@@ -1,0 +1,41 @@
+[build-system]
+requires = ["scikit-build-core>=0.9", "pybind11>=3.0", "setuptools_scm[toml]>=8"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "synth-xfer"
+version = "0.0.0"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+  "xdsl>=0.48.3",
+  "xdsl-smt @ https://github.com/opencompl/xdsl-smt/archive/4704d93.tar.gz",
+  "llvmlite>=0.45.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pybind11>=3.0",
+  "pytest>=8.0",
+]
+
+[project.scripts]
+sxf = "synth_xfer.cli.main:main"
+tmp = "synth_xfer.cli.tmp:main"
+
+[tool.scikit-build]
+minimum-version = "0.9"
+build-dir = "build/"
+wheel.expand-macos-universal-tags = true
+wheel.packages = ["synth_xfer"]
+cmake.define = { CMAKE_EXPORT_COMPILE_COMMANDS = true }
+
+[tool.ruff]
+line-length = 90
+target-version = "py313"
+lint.extend-select = ["I"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["synth_xfer"]
+combine-as-imports = true
+force-sort-within-sections = true
