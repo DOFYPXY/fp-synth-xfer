@@ -19,8 +19,8 @@
     %shamt_lt_cl1 = "transfer.cmp"(%arg1, %cl1) {predicate=6:i64}: (!transfer.integer, !transfer.integer) -> i1
     %nsw = "transfer.select"(%is_non_neg, %shamt_lt_cl0, %shamt_lt_cl1): (i1, i1, i1) -> i1
 
-    %nuw_and_nsw = "transfer.and"(%nuw, %nsw) : (i1, i1) -> i1
-    %res = "transfer.and"(%check, %nuw_and_nsw) : (i1, i1) -> i1
+    %nuw_and_nsw = "arith.andi"(%nuw, %nsw) : (i1, i1) -> i1
+    %res = "arith.andi"(%check, %nuw_and_nsw) : (i1, i1) -> i1
     "func.return"(%res) : (i1) -> ()
   }) {function_type = (!transfer.integer, !transfer.integer) -> i1, sym_name = "op_constraint"} : () -> ()
 }) : () -> ()

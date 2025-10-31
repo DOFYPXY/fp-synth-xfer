@@ -15,7 +15,7 @@
     %rem = "transfer.urem"(%arg0, %safe_arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %exact = "transfer.cmp"(%rem, %const0) {predicate=0:i64}: (!transfer.integer, !transfer.integer) -> i1
 
-    %check = "transfer.and"(%exact, %arg1_neq_0) : (i1, i1) -> i1
+    %check = "arith.andi"(%exact, %arg1_neq_0) : (i1, i1) -> i1
     "func.return"(%check) : (i1) -> ()
   }) {function_type = (!transfer.integer, !transfer.integer) -> i1, sym_name = "op_constraint"} : () -> ()
 }) : () -> ()

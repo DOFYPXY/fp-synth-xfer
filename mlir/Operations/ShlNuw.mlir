@@ -13,7 +13,7 @@
     %clz = "transfer.countl_zero"(%arg0) : (!transfer.integer) -> !transfer.integer
     %nuw = "transfer.cmp"(%clz, %arg1) {predicate=9:i64}: (!transfer.integer, !transfer.integer) -> i1
 
-    %res = "transfer.and"(%check, %nuw) : (i1, i1) -> i1
+    %res = "arith.andi"(%check, %nuw) : (i1, i1) -> i1
     "func.return"(%res) : (i1) -> ()
   }) {function_type = (!transfer.integer, !transfer.integer) -> i1, sym_name = "op_constraint"} : () -> ()
 }) : () -> ()

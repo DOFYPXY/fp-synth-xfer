@@ -10,7 +10,7 @@
     %const0 = "transfer.constant"(%arg1) {value=0:index}:(!transfer.integer)->!transfer.integer
     %arg1_eq_0 = "transfer.cmp"(%const0, %arg1) {predicate=0:i64}: (!transfer.integer, !transfer.integer) -> i1
     %const1 = "arith.constant"() {value=1:i1}: () -> i1
-    %check = "transfer.xor"(%arg1_eq_0, %const1) : (i1, i1) -> i1
+    %check = "arith.xori"(%arg1_eq_0, %const1) : (i1, i1) -> i1
     "func.return"(%check) : (i1) -> ()
   }) {function_type = (!transfer.integer, !transfer.integer) -> i1, sym_name = "op_constraint"} : () -> ()
 }) : () -> ()

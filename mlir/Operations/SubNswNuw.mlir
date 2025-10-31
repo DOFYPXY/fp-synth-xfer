@@ -16,7 +16,7 @@
     %zero = "transfer.constant"(%arg0){value=0:index} : (!transfer.integer) -> !transfer.integer
     %nsw = "transfer.cmp"(%andres, %zero) {predicate=5:i64}: (!transfer.integer, !transfer.integer) -> i1
 
-    %check = "transfer.and"(%nuw, %nsw) : (i1, i1) -> i1
+    %check = "arith.andi"(%nuw, %nsw) : (i1, i1) -> i1
     "func.return"(%check) : (i1) -> ()
   }) {function_type = (!transfer.integer, !transfer.integer) -> i1, sym_name = "op_constraint"} : () -> ()
 }): () -> ()
