@@ -1,12 +1,31 @@
 from argparse import (
     ArgumentDefaultsHelpFormatter,
     ArgumentParser,
+    ArgumentTypeError,
     FileType,
     Namespace,
 )
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from synth_xfer._util.eval import AbstractDomain
+
+if TYPE_CHECKING:
+    from synth_xfer._eval_engine import BW
+
+
+def bw_type(value: str) -> "BW":
+    try:
+        val = int(value)
+    except ValueError:
+        raise ArgumentTypeError(f"{value!r} is not an integer")
+
+    if val not in (4, 8, 16, 32, 64):
+        raise ArgumentTypeError(
+            f"Invalid value: {val}. Allowed values are 4, 8, 16, 32, 64."
+        )
+
+    return val
 
 
 def build_parser(prog: str) -> Namespace:
@@ -56,7 +75,7 @@ def build_parser(prog: str) -> Namespace:
         help="Inverse temperature for MCMC. The larger the value is, the lower the probability of accepting a program with a higher cost.",
         default=200,
     )
-    p.add_argument("-bw", type=int, default=4, help="Bitwidth")
+    p.add_argument("-bw", type=bw_type, default=4, help="Bitwidth")
     p.add_argument("-samples", type=int, default=None, help="Number of lattice samples")
     p.add_argument(
         "-num_iters",

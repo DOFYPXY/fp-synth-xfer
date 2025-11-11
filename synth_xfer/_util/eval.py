@@ -1,9 +1,37 @@
 from enum import Enum
 from pathlib import Path
 from subprocess import PIPE, run
+from typing import TYPE_CHECKING, Callable
 
-from synth_xfer._eval_engine import enum_low_knownbits_4, eval_knownbits_4
+from synth_xfer._eval_engine import (
+    ToEvalKnownBits4,
+    ToEvalKnownBits8,
+    ToEvalKnownBits16,
+    ToEvalKnownBits32,
+    ToEvalKnownBits64,
+    enum_low_knownbits_4,
+    enum_low_knownbits_8,
+    enum_low_knownbits_16,
+    enum_low_knownbits_32,
+    enum_low_knownbits_64,
+    enum_mid_knownbits_4,
+    enum_mid_knownbits_8,
+    enum_mid_knownbits_16,
+    enum_mid_knownbits_32,
+    enum_mid_knownbits_64,
+    eval_knownbits_4,
+    eval_knownbits_8,
+    eval_knownbits_16,
+    eval_knownbits_32,
+    eval_knownbits_64,
+)
 from synth_xfer._util.eval_result import EvalResult, PerBitRes, get_per_bit
+from synth_xfer._util.helper_funcs import HelperFuncs
+from synth_xfer.jit import Jit
+from synth_xfer.lower_to_llvm import LowerToLLVM
+
+if TYPE_CHECKING:
+    from synth_xfer._eval_engine import BW, KnownBitsToEval
 
 
 class AbstractDomain(Enum):
@@ -42,28 +70,63 @@ def _parse_engine_output(output: str) -> list[EvalResult]:
 
 
 def setup_eval(
-    # domain: AbstractDomain,
-    # TODO handle other bws
-    # low_bws: list[int],
-    # med_bws: list[tuple[int, int]],
-    # high_bws: list[tuple[int, int, int]],
-    # seed: int,
-    # TODO should it be a ptr or an mlir mod?
-    conc_op_ptr: int,
-    op_con_ptr: int | None,
-    # TODO need op con ptr too
-):
-    return enum_low_knownbits_4(conc_op_ptr, op_con_ptr)
+    bw: "BW",
+    samples: int | None,
+    seed: int,
+    helper_funcs: HelperFuncs,
+    jit: Jit,
+) -> "KnownBitsToEval":
+    lowerer = LowerToLLVM(bw)
+    crt = lowerer.add_fn(helper_funcs.crt_func, shim=True)
+    op_constraint = (
+        lowerer.add_fn(helper_funcs.op_constraint_func, shim=True)
+        if helper_funcs.op_constraint_func
+        else None
+    )
+
+    jit.add_mod(str(lowerer))
+    concrete_fn_ptr = jit.get_fn_ptr(crt.name)
+    constraint_fn_ptr = jit.get_fn_ptr(op_constraint.name) if op_constraint else None
+
+    low_fns: dict[BW, Callable[[int, int | None], "KnownBitsToEval"]] = {
+        4: enum_low_knownbits_4,
+        8: enum_low_knownbits_8,
+        16: enum_low_knownbits_16,
+        32: enum_low_knownbits_32,
+        64: enum_low_knownbits_64,
+    }
+
+    mid_fns: dict[BW, Callable[[int, int | None, int, int], "KnownBitsToEval"]] = {
+        4: enum_mid_knownbits_4,
+        8: enum_mid_knownbits_8,
+        16: enum_mid_knownbits_16,
+        32: enum_mid_knownbits_32,
+        64: enum_mid_knownbits_64,
+    }
+
+    if samples:
+        return mid_fns[bw](concrete_fn_ptr, constraint_fn_ptr, samples, seed)
+    else:
+        return low_fns[bw](concrete_fn_ptr, constraint_fn_ptr)
 
 
 # TODO may want to just pass whole jit in here
 def eval_transfer_func(
-    to_eval,
+    to_eval: "KnownBitsToEval",
     xfers: list[int],
     bases: list[int],
     # domain: AbstractDomain,
 ) -> list[EvalResult]:
-    res = eval_knownbits_4(to_eval, xfers, bases)
+    if isinstance(to_eval, ToEvalKnownBits4):
+        res = eval_knownbits_4(to_eval, xfers, bases)
+    elif isinstance(to_eval, ToEvalKnownBits8):
+        res = eval_knownbits_8(to_eval, xfers, bases)
+    elif isinstance(to_eval, ToEvalKnownBits16):
+        res = eval_knownbits_16(to_eval, xfers, bases)
+    elif isinstance(to_eval, ToEvalKnownBits32):
+        res = eval_knownbits_32(to_eval, xfers, bases)
+    elif isinstance(to_eval, ToEvalKnownBits64):
+        res = eval_knownbits_64(to_eval, xfers, bases)
 
     return _parse_engine_output(str(res))
 

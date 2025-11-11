@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Callable, Literal
+from typing import TYPE_CHECKING, Callable
 
 from xdsl.context import Context
 from xdsl.dialects.arith import Arith
@@ -24,6 +24,9 @@ from synth_xfer.cli.args import build_parser
 from synth_xfer.jit import Jit
 from synth_xfer.lower_to_llvm import LowerToLLVM
 
+if TYPE_CHECKING:
+    from synth_xfer._eval_engine import BW, KnownBitsToEval
+
 # TODO this should be made local
 ctx = Context()
 ctx.load_dialect(Arith)
@@ -46,10 +49,9 @@ def _construct_top_func(transfer: FuncOp) -> FuncOp:
     return func
 
 
-# TODO type toeval
 def _eval_helper(
-    to_eval,
-    bw: int,
+    to_eval: "KnownBitsToEval",
+    bw: "BW",
     _domain: AbstractDomain,
     helper_funcs: HelperFuncs,
     ret_top_func: FunctionWithCondition,
@@ -223,7 +225,7 @@ def run(
     total_rounds: int,
     program_length: int,
     inv_temp: int,
-    bw: Literal[4] | Literal[8] | Literal[16] | Literal[32] | Literal[64],
+    bw: "BW",
     samples: int | None,
     num_iters: int,
     condition_length: int,
@@ -236,17 +238,14 @@ def run(
     outputs_folder: Path,
 ) -> EvalResult:
     # TODO jit object needs to be alive for the runtime of this function (or else it'll be free'd and we'll segfault)
-    # So it's important who owns it, etc. we'll have run own it for right now
+    # So it's important who owns it, etc.
 
-    # TODO move this check into arg parsing
-    assert bw == 4 or bw == 8 or bw == 16 or bw == 32 or bw == 64
-
-    # TODO maybe change the llvm module name
-    lowerer = LowerToLLVM(bw, "synth_xfer_mod")
+    lowerer = LowerToLLVM(bw)
     jit = Jit()
 
     # TODO fix evalresult
-    EvalResult.init_bw_settings(set({4}), set(), set())
+    lbw, mbw = (set(), set({bw})) if samples else (set({bw}), set())
+    EvalResult.init_bw_settings(lbw, mbw, set())
 
     logger.debug("Round_ID\tSound%\tUExact%\tDisReduce\tCost")
 
@@ -266,22 +265,7 @@ def run(
     ret_top_func = FunctionWithCondition(_construct_top_func(helper_funcs.transfer_func))
     ret_top_func.set_func_name("ret_top")
 
-    # TODO need auto shiming
-    crt = lowerer.add_fn(helper_funcs.crt_func)
-    new_crt = lowerer.shim_conc(crt)
-    # TODO give op con func to setup eval
-    _ = (
-        lowerer.add_fn(helper_funcs.op_constraint_func, shim=True)
-        if helper_funcs.op_constraint_func
-        else None
-    )
-
-    jit.add_mod(str(crt) + str(new_crt))
-    crt_fn_ptr = jit.get_fn_ptr(new_crt.name)
-
-    # TODO need to select domain and bw here
-    # but will just hardcode to kb_4 for now
-    to_eval = setup_eval(crt_fn_ptr, None)
+    to_eval = setup_eval(bw, samples, random_seed, helper_funcs, jit)
 
     solution_eval_func = _eval_helper(
         to_eval, bw, domain, helper_funcs, ret_top_func, jit
@@ -373,9 +357,10 @@ def run(
     _save_solution(solution_module, outputs_folder)
 
     lowerer.add_fn(helper_funcs.meet_func)
-    lowerer.add_mod(solution_module)
+    lowerer.add_fn(helper_funcs.get_top_func)
+    lowerer.add_mod(solution_module, ["solution"])
     jit.add_mod(str(lowerer))
-    solution_ptr = jit.get_fn_ptr("solution")
+    solution_ptr = jit.get_fn_ptr("solution_shim")
     solution_result = eval_transfer_func(to_eval, [solution_ptr], [])[0]
     solution_sound = solution_result.get_sound_prop() * 100
     solution_exact = solution_result.get_exact_prop() * 100

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
-from typing import Never, overload
+from typing import Literal, Never, Union, overload
+
+BW = Literal[4, 8, 16, 32, 64]
 
 class Results:
     def __str__(self) -> str: ...
@@ -87,25 +89,33 @@ class ToEvalKnownBits64(Sequence[KnownBits64Triple]):
     def __getitem__(self, index: slice) -> Never: ...
     def __iter__(self) -> Iterator[KnownBits64Triple]: ...
 
+KnownBitsToEval = Union[
+    ToEvalKnownBits4,
+    ToEvalKnownBits8,
+    ToEvalKnownBits16,
+    ToEvalKnownBits32,
+    ToEvalKnownBits64,
+]
+
 def enum_low_knownbits_4(crtOpAddr: int, opConAddr: int | None) -> ToEvalKnownBits4: ...
 def enum_low_knownbits_8(crtOpAddr: int, opConAddr: int | None) -> ToEvalKnownBits8: ...
 def enum_low_knownbits_16(crtOpAddr: int, opConAddr: int | None) -> ToEvalKnownBits16: ...
 def enum_low_knownbits_32(crtOpAddr: int, opConAddr: int | None) -> ToEvalKnownBits32: ...
 def enum_low_knownbits_64(crtOpAddr: int, opConAddr: int | None) -> ToEvalKnownBits64: ...
 def enum_mid_knownbits_4(
-    crtOpAddr: int, opConFnAddr: int | None, num_lat_samples: int
+    crtOpAddr: int, opConFnAddr: int | None, num_lat_samples: int, seed: int
 ) -> ToEvalKnownBits4: ...
 def enum_mid_knownbits_8(
-    crtOpAddr: int, opConFnAddr: int | None, num_lat_samples: int
+    crtOpAddr: int, opConFnAddr: int | None, num_lat_samples: int, seed: int
 ) -> ToEvalKnownBits8: ...
 def enum_mid_knownbits_16(
-    crtOpAddr: int, opConFnAddr: int | None, num_lat_samples: int
+    crtOpAddr: int, opConFnAddr: int | None, num_lat_samples: int, seed: int
 ) -> ToEvalKnownBits16: ...
 def enum_mid_knownbits_32(
-    crtOpAddr: int, opConFnAddr: int | None, num_lat_samples: int
+    crtOpAddr: int, opConFnAddr: int | None, num_lat_samples: int, seed: int
 ) -> ToEvalKnownBits32: ...
 def enum_mid_knownbits_64(
-    crtOpAddr: int, opConFnAddr: int | None, num_lat_samples: int
+    crtOpAddr: int, opConFnAddr: int | None, num_lat_samples: int, seed: int
 ) -> ToEvalKnownBits64: ...
 def enum_high_knownbits_4(
     crtOpAddr: int, opConFnAddr: int | None, num_lat_samples: int, num_conc_samples: int

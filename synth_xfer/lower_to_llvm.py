@@ -260,7 +260,7 @@ def lower_type(typ: Attribute, bw: int) -> ir.Type:
 
 
 class LowerToLLVM:
-    def __init__(self, bw: int, name: str) -> None:
+    def __init__(self, bw: int, name: str = "") -> None:
         self.bw = bw
         self.llvm_mod = ir.Module(name=name)
         self.fns: dict[str, ir.Function] = {}
@@ -284,6 +284,17 @@ class LowerToLLVM:
 
         i64 = ir.IntType(64)
         ret_match = fn_ret_type == i64
+        arg_match = fn_arg_types == (i64, i64)
+
+        return ret_match and arg_match
+
+    @staticmethod
+    def is_constraint(mlir_fn: FuncOp) -> bool:
+        fn_ret_type = lower_type(mlir_fn.function_type.outputs.data[0], 64)
+        fn_arg_types = tuple(lower_type(x.type, 64) for x in mlir_fn.args)
+
+        i64 = ir.IntType(64)
+        ret_match = fn_ret_type == ir.IntType(1)
         arg_match = fn_arg_types == (i64, i64)
 
         return ret_match and arg_match
@@ -313,27 +324,58 @@ class LowerToLLVM:
 
         self.fns[fn_name] = _LowerFuncToLLVM(mlir_fn, llvm_fn, self.fns, self.bw).llvm_fn
 
-        # TODO factor out this out into a class shim function
-        if shim and self.is_concrete_op(mlir_fn):
-            return self.shim_conc(self.fns[fn_name])
-        elif shim and self.is_transfer_fn(mlir_fn):
-            return self.shim_xfer(self.fns[fn_name])
-        elif shim:
-            raise ValueError(
-                f"Cannot shim non concrete and non transfer function {fn_name}"
-            )
+        if shim:
+            return self.shim(mlir_fn, fn_name)
+        else:
+            return self.fns[fn_name]
 
-        return self.fns[fn_name]
-
-    def add_mod(self, mod: ModuleOp) -> dict[str, ir.Function]:
+    def add_mod(self, mod: ModuleOp, to_shim: list[str] = []) -> dict[str, ir.Function]:
         fns: dict[str, ir.Function] = {}
 
         for func in mod.ops:
             assert isinstance(func, FuncOp)
-            f = self.add_fn(func)
+            fn_name = func.sym_name.data
+            shim = fn_name in to_shim
+            f = self.add_fn(func, shim=shim)
             fns[f.name] = f
 
         return fns
+
+    def shim(self, mlir_fn: FuncOp, fn_name: str) -> ir.Function:
+        if self.is_concrete_op(mlir_fn):
+            return self.shim_conc(self.fns[fn_name])
+        elif self.is_constraint(mlir_fn):
+            return self.shim_constraint(self.fns[fn_name])
+        elif self.is_transfer_fn(mlir_fn):
+            return self.shim_xfer(self.fns[fn_name])
+        else:
+            raise ValueError(
+                f"Cannot shim non concrete and non transfer function {fn_name}"
+            )
+
+    def shim_constraint(self, old_fn: ir.Function) -> ir.Function:
+        lane_t = ir.IntType(self.bw)
+        wide_t = ir.IntType(64)
+        bool_t = ir.IntType(1)
+
+        fn_name = f"{old_fn.name}_shim"
+        shim_ty = ir.FunctionType(bool_t, [wide_t, wide_t])
+        shim_fn = ir.Function(self.llvm_mod, shim_ty, name=fn_name)
+        shim_fn = self.add_attrs(shim_fn)
+
+        entry = shim_fn.append_basic_block(name="entry")
+        b = ir.IRBuilder(entry)
+
+        a64, b64 = shim_fn.args
+        a64.name = "a64"
+        b64.name = "b64"
+
+        a_n = a64 if self.bw == 64 else b.trunc(a64, lane_t)
+        b_n = b64 if self.bw == 64 else b.trunc(b64, lane_t)
+        r = b.call(old_fn, [a_n, b_n])
+        b.ret(r)
+
+        return shim_fn
 
     def shim_conc(self, old_fn: ir.Function) -> ir.Function:
         lane_t = ir.IntType(self.bw)
