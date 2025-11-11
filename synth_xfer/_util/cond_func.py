@@ -5,6 +5,8 @@ from xdsl.dialects.builtin import StringAttr, i1
 from xdsl.dialects.func import CallOp, FuncOp, ReturnOp
 from xdsl_smt.dialects.transfer import AbstractValueType, GetOp, MakeOp, SelectOp
 
+from synth_xfer._util.dce import dce
+
 
 @dataclass
 class FunctionWithCondition:
@@ -26,10 +28,9 @@ class FunctionWithCondition:
         if self.cond is not None:
             self.cond.sym_name = StringAttr(f"{new_func_name}_cond")
 
-    # TODO I'd like this to be a __str__ method
-    def to_str(self, eliminate_dead_code: Callable[[FuncOp], FuncOp]):
-        cond_str = "True\n" if self.cond is None else str(eliminate_dead_code(self.cond))
-        return f"Cond:\n{cond_str}\nFunc:{str(eliminate_dead_code(self.func))}"
+    def __str__(self):
+        cond_str = "True\n" if self.cond is None else dce(self.cond)
+        return f"Cond:\n{cond_str}\nFunc:{dce(self.func)}"
 
     def get_function(self) -> FuncOp:
         """

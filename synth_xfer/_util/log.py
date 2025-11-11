@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import List
+from typing import Iterable
 
 
 def setup_loggers(output_dir: Path, verbose: int):
@@ -27,7 +27,9 @@ def setup_loggers(output_dir: Path, verbose: int):
     critical_handler.setLevel(logging.CRITICAL)
     logger.addHandler(critical_handler)
 
-    error_handler = logging.FileHandler(output_dir.joinpath("error.mlir"), mode="w", delay=True)
+    error_handler = logging.FileHandler(
+        output_dir.joinpath("error.mlir"), mode="w", delay=True
+    )
     error_handler.setLevel(logging.ERROR)
     error_handler.addFilter(lambda record: record.levelno == logging.ERROR)
     logger.addHandler(error_handler)
@@ -36,7 +38,7 @@ def setup_loggers(output_dir: Path, verbose: int):
     return logger
 
 
-def print_set_of_funcs_to_file(funcs: List[str], iter: int, path: Path):
+def print_fns_to_file(funcs: Iterable[str], iter: int, path: Path):
     with open(path.joinpath(f"iter{iter}.mlir"), "w") as file:
         for f in funcs:
             file.write(f"{f}\n")

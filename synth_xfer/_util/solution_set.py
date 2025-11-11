@@ -5,18 +5,18 @@ import io
 import logging
 from typing import Callable
 
-from xdsl.context import Context
 from xdsl.dialects.builtin import ModuleOp
 from xdsl.dialects.func import CallOp, FuncOp, ReturnOp
 
 from synth_xfer._util.cond_func import FunctionWithCondition
+from synth_xfer._util.dce import dce
 from synth_xfer._util.eval_result import EvalResult
 from synth_xfer._util.synth_context import SynthesizerContext
 from synth_xfer._util.verifier import verify_transfer_function
 from synth_xfer.cli.main import HelperFuncs
 
 
-def rename_functions(lst: list[FunctionWithCondition], prefix: str) -> list[str]:
+def _rename_functions(lst: list[FunctionWithCondition], prefix: str) -> list[str]:
     func_names: list[str] = []
     for i, func in enumerate(lst):
         func_names.append(prefix + str(i))
@@ -24,11 +24,10 @@ def rename_functions(lst: list[FunctionWithCondition], prefix: str) -> list[str]
     return func_names
 
 
-def verify_function(
+def _verify_function(
     bw: int,
     func: FunctionWithCondition,
     helper_funcs: HelperFuncs,
-    ctx: Context,
     timeout: int,
 ) -> int | None:
     cur_helper = [func.func]
@@ -45,7 +44,7 @@ def verify_function(
     helpers = [x for x in helpers if x is not None]
 
     return verify_transfer_function(
-        func.get_function(), helper_funcs.crt_func, helpers, ctx, bw, bw, timeout
+        func.get_function(), helper_funcs.crt_func, helpers, bw, bw, timeout
     )
 
 
@@ -55,7 +54,6 @@ class SolutionSet(ABC):
     solutions_size: int
     solutions: list[FunctionWithCondition]
     precise_set: list[FuncOp]
-    eliminate_dead_code: Callable[[FuncOp], FuncOp]
     is_perfect: bool
 
     """
@@ -73,7 +71,6 @@ class SolutionSet(ABC):
     def __init__(
         self,
         initial_solutions: list[FunctionWithCondition],
-        eliminate_dead_code: Callable[[FuncOp], FuncOp],
         eval_func: Callable[
             [
                 list[FunctionWithCondition],
@@ -84,10 +81,9 @@ class SolutionSet(ABC):
         logger: logging.Logger,
         is_perfect: bool = False,
     ):
-        rename_functions(initial_solutions, "partial_solution_")
+        _rename_functions(initial_solutions, "partial_solution_")
         self.solutions = initial_solutions
         self.solutions_size = len(initial_solutions)
-        self.eliminate_dead_code = eliminate_dead_code
         self.eval_func = eval_func
         self.logger = logger
         self.precise_set = []
@@ -106,7 +102,6 @@ class SolutionSet(ABC):
         # Parameters used by SMT verifier
         helper_funcs: HelperFuncs,
         num_unsound_candidates: int,
-        ctx: Context,
     ) -> SolutionSet: ...
 
     def has_solution(self) -> bool:
@@ -151,10 +146,10 @@ class SolutionSet(ABC):
         final_solution, part_solutions = self.generate_solution()
         function_lst: list[FuncOp] = []
         for sol in self.solutions:
-            func_body = self.eliminate_dead_code(sol.func)
+            func_body = dce(sol.func)
             function_lst.append(func_body)
             if sol.cond is not None:
-                func_cond = self.eliminate_dead_code(sol.cond)
+                func_cond = dce(sol.cond)
                 function_lst.append(func_cond)
 
         function_lst += part_solutions
@@ -178,12 +173,10 @@ class UnsizedSolutionSet(SolutionSet):
             list[EvalResult],
         ],
         logger: logging.Logger,
-        eliminate_dead_code: Callable[[FuncOp], FuncOp],
         is_perfect: bool = False,
     ):
         super().__init__(
             initial_solutions,
-            eliminate_dead_code,
             eval_func_with_cond,
             logger,
             is_perfect,
@@ -192,9 +185,9 @@ class UnsizedSolutionSet(SolutionSet):
     def handle_inconsistent_result(self, f: FunctionWithCondition):
         str_output = io.StringIO()
 
-        print(self.eliminate_dead_code(f.func), file=str_output)
+        print(dce(f.func), file=str_output)
         if f.cond is not None:
-            print(self.eliminate_dead_code(f.cond), file=str_output)
+            print(dce(f.cond), file=str_output)
         print(f.get_function(), file=str_output)
 
         func_op_str = str_output.getvalue()
@@ -209,10 +202,9 @@ class UnsizedSolutionSet(SolutionSet):
         new_candidates_c: list[FunctionWithCondition],
         helper_funcs: HelperFuncs,
         num_unsound_candidates: int,
-        ctx: Context,
     ) -> SolutionSet:
         candidates = self.solutions + new_candidates_sp + new_candidates_c
-        rename_functions(candidates, "part_solution_")
+        _rename_functions(candidates, "part_solution_")
         self.logger.info(f"Size of new candidates: {len(new_candidates_sp)}")
         self.logger.info(f"Size of new conditional candidates: {len(new_candidates_c)}")
         self.logger.info(f"Size of solutions: {len(candidates)}")
@@ -234,7 +226,7 @@ class UnsizedSolutionSet(SolutionSet):
             cond_number = "None" if cand.cond is None else cand.cond.attributes["number"]
 
             if (cand in new_candidates_sp) or (cand in new_candidates_c):
-                unsound_bit = verify_function(bw, cand, helper_funcs, ctx, timeout=200)
+                unsound_bit = _verify_function(bw, cand, helper_funcs, timeout=200)
                 if unsound_bit is None:
                     self.logger.info(
                         f"Skip a function of which verification timed out, body: {body_number}, cond: {cond_number}"
@@ -282,7 +274,7 @@ class UnsizedSolutionSet(SolutionSet):
         precise_candidates_to_eval = [
             FunctionWithCondition(f.clone()) for f in precise_candidates
         ]
-        rename_functions(precise_candidates_to_eval, "precise_candidates_")
+        _rename_functions(precise_candidates_to_eval, "precise_candidates_")
         result = self.eval_improve(precise_candidates_to_eval)
 
         sorted_pairs = sorted(
@@ -319,7 +311,7 @@ class UnsizedSolutionSet(SolutionSet):
                 f"\tbody {body_number}, cond {cond_number} : #exact {res.get_exacts() - res.get_unsolved_exacts()} -> {res.get_exacts()}, dist_improve: {res.get_potential_improve():3f}%, cond?: {self.solutions[i].cond is not None}, learn?: {to_learn}"
             )
             if to_learn:
-                learn_form_funcs.append(self.eliminate_dead_code(sol.func))
+                learn_form_funcs.append(dce(sol.func))
 
         freq_of_learn_funcs = SynthesizerContext.count_op_frequency(learn_form_funcs)
         context.update_weights(freq_of_learn_funcs)

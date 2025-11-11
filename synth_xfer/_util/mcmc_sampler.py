@@ -17,6 +17,11 @@ from xdsl_smt.dialects.transfer import (
     TransIntegerType,
 )
 
+from synth_xfer._util.cost_model import (
+    abduction_cost,
+    precise_cost,
+    sound_and_precise_cost,
+)
 from synth_xfer._util.dsl_operators import BINT_T, BOOL_T, INT_T
 from synth_xfer._util.eval_result import EvalResult
 from synth_xfer._util.mutation_program import MutationProgram
@@ -40,6 +45,7 @@ class MCMCSampler:
     step_cnt: int
     total_steps: int
     is_cond: bool
+    length: int
 
     def __init__(
         self,
@@ -64,10 +70,11 @@ class MCMCSampler:
         self.total_steps = total_steps
         self.step_cnt = 0
         self.random = context.get_random_class()
+        self.length = length
         if reset_init_program:
-            self.current = self.construct_init_program(func, length)
+            self.current = self.construct_init_program(func, self.length)
             if random_init_program:
-                self.reset_to_random_prog(length)
+                self.reset_to_random_prog()
 
     def compute_cost(self, cmp: EvalResult) -> float:
         return self.cost_func(cmp, self.step_cnt / self.total_steps)
@@ -137,9 +144,13 @@ class MCMCSampler:
         tmp_int_ssavalue = block.last_op.results[0]
 
         # Part II: Constants
-        true: arith.ConstantOp = arith.ConstantOp(IntegerAttr.from_int_and_width(1, 1), i1)
+        true: arith.ConstantOp = arith.ConstantOp(
+            IntegerAttr.from_int_and_width(1, 1), i1
+        )
         set_ret_type(true, BOOL_T)
-        false: arith.ConstantOp = arith.ConstantOp(IntegerAttr.from_int_and_width(0, 1), i1)
+        false: arith.ConstantOp = arith.ConstantOp(
+            IntegerAttr.from_int_and_width(0, 1), i1
+        )
         set_ret_type(false, BOOL_T)
         all_ones = GetAllOnesOp(tmp_int_ssavalue)
         set_ret_type(all_ones, INT_T)
@@ -244,10 +255,91 @@ class MCMCSampler:
         #     ratio = self.replace_make_operand(ops, len(ops) - 2)
         return self
 
-    def reset_to_random_prog(self, _length: int):
+    def reset_to_random_prog(self):
         # Part III-2: Random reset main body
         total_ops_len = len(self.current.ops)
         # Only modify ops in the main body
         for i in range(total_ops_len):
             if not not_in_main_body(self.current.ops[i]):
                 self.replace_entire_operation(i, False)
+
+
+def setup_mcmc(
+    transfer_func: FuncOp,
+    precise_set: list[FuncOp],
+    num_abd_proc: int,
+    num_programs: int,
+    context_regular: SynthesizerContext,
+    context_weighted: SynthesizerContext,
+    context_cond: SynthesizerContext,
+    program_length: int,
+    total_rounds: int,
+    cond_length: int,
+) -> tuple[list[MCMCSampler], list[FuncOp], tuple[range, range, range]]:
+    """
+    A mcmc sampler use one of 3 modes: sound & precise, precise, condition
+    This function specify which mode should be used for each mcmc sampler
+    For example, mcmc samplers with index in sp_range should use "sound&precise"
+    """
+
+    p_size = 0
+    c_size = num_abd_proc
+    sp_size = num_programs - p_size - c_size
+
+    if len(precise_set) == 0:
+        sp_size += c_size
+        c_size = 0
+
+    sp_range = range(0, sp_size)
+    p_range = range(sp_size, sp_size + p_size)
+    c_range = range(sp_size + p_size, sp_size + p_size + c_size)
+
+    prec_set_after_distribute: list[FuncOp] = []
+
+    if c_size > 0:
+        # Distribute the precise funcs into c_range
+        prec_set_size = len(precise_set)
+        base_count = c_size // prec_set_size
+        remainder = c_size % prec_set_size
+        for i, item in enumerate(precise_set):
+            for _ in range(base_count + (1 if i < remainder else 0)):
+                prec_set_after_distribute.append(item.clone())
+
+    mcmc_samplers: list[MCMCSampler] = []
+    for i in range(num_programs):
+        if i in sp_range:
+            spl = MCMCSampler(
+                transfer_func,
+                context_regular
+                if i < (sp_range.start + sp_range.stop) // 2
+                else context_weighted,
+                sound_and_precise_cost,
+                program_length,
+                total_rounds,
+                random_init_program=True,
+            )
+        elif i in p_range:
+            spl = MCMCSampler(
+                transfer_func,
+                context_regular
+                if i < (p_range.start + p_range.stop) // 2
+                else context_weighted,
+                precise_cost,
+                program_length,
+                total_rounds,
+                random_init_program=True,
+            )
+        else:
+            spl = MCMCSampler(
+                transfer_func,
+                context_cond,
+                abduction_cost,
+                cond_length,
+                total_rounds,
+                random_init_program=True,
+                is_cond=True,
+            )
+
+        mcmc_samplers.append(spl)
+
+    return mcmc_samplers, prec_set_after_distribute, (sp_range, p_range, c_range)

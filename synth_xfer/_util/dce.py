@@ -1,8 +1,8 @@
-from xdsl.context import Context
+from typing import cast
+
 from xdsl.dialects.builtin import ModuleOp
 from xdsl.dialects.func import FuncOp, ReturnOp
 from xdsl.ir import Operation
-from xdsl.passes import ModulePass
 from xdsl.pattern_rewriter import PatternRewriter, PatternRewriteWalker, RewritePattern
 
 
@@ -14,9 +14,12 @@ class RemoveTransferDeadPattern(RewritePattern):
             rewriter.erase_matched_op()
 
 
-class TransferDeadCodeElimination(ModulePass):
-    name = "transfer-dce"
+def dce(op: FuncOp) -> FuncOp:
+    """
+    WARNING: this function modifies the func passed to it in place!
+    """
 
-    def apply(self, _ctx: Context, op: ModuleOp):
-        walker = PatternRewriteWalker(RemoveTransferDeadPattern(), walk_reverse=True)
-        walker.rewrite_module(op)
+    walker = PatternRewriteWalker(RemoveTransferDeadPattern(), walk_reverse=True)
+    walker.rewrite_module(cast(ModuleOp, op))
+
+    return op

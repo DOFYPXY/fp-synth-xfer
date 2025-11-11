@@ -325,8 +325,15 @@ class LowerToLLVM:
 
         return self.fns[fn_name]
 
-    def add_fns(self, fns: list[FuncOp]) -> list[ir.Function]:
-        return [self.add_fn(x) for x in fns]
+    def add_mod(self, mod: ModuleOp) -> dict[str, ir.Function]:
+        fns: dict[str, ir.Function] = {}
+
+        for func in mod.ops:
+            assert isinstance(func, FuncOp)
+            f = self.add_fn(func)
+            fns[f.name] = f
+
+        return fns
 
     def shim_conc(self, old_fn: ir.Function) -> ir.Function:
         lane_t = ir.IntType(self.bw)

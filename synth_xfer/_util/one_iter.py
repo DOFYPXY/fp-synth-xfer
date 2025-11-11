@@ -1,23 +1,16 @@
 import logging
 import time
 
-from xdsl.context import Context
 from xdsl.dialects.builtin import StringAttr
 from xdsl.dialects.func import FuncOp
 
 from synth_xfer._util.cond_func import FunctionWithCondition
-from synth_xfer._util.cost_model import (
-    abduction_cost,
-    decide,
-    precise_cost,
-    sound_and_precise_cost,
-)
+from synth_xfer._util.cost_model import decide
 from synth_xfer._util.eval_result import EvalResult
 from synth_xfer._util.helper_funcs import HelperFuncs
 from synth_xfer._util.mcmc_sampler import MCMCSampler
 from synth_xfer._util.random import Random
 from synth_xfer._util.solution_set import SolutionSet
-from synth_xfer._util.synth_context import SynthesizerContext
 
 
 def _build_eval_list(
@@ -53,111 +46,27 @@ def _build_eval_list(
     return lst
 
 
-def _mcmc_setup(
-    solution_set: SolutionSet, num_abd_proc: int, num_programs: int
-) -> tuple[range, range, range, int, list[FuncOp]]:
-    """
-    A mcmc sampler use one of 3 modes: sound & precise, precise, condition
-    This function specify which mode should be used for each mcmc sampler
-    For example, mcmc samplers with index in sp_range should use "sound&precise"
-    """
-
-    p_size = 0
-    c_size = num_abd_proc
-    sp_size = num_programs - p_size - c_size
-
-    if len(solution_set.precise_set) == 0:
-        sp_size += c_size
-        c_size = 0
-
-    sp_range = range(0, sp_size)
-    p_range = range(sp_size, sp_size + p_size)
-    c_range = range(sp_size + p_size, sp_size + p_size + c_size)
-
-    prec_set_after_distribute: list[FuncOp] = []
-
-    if c_size > 0:
-        # Distribute the precise funcs into c_range
-        prec_set_size = len(solution_set.precise_set)
-        base_count = c_size // prec_set_size
-        remainder = c_size % prec_set_size
-        for i, item in enumerate(solution_set.precise_set):
-            for _ in range(base_count + (1 if i < remainder else 0)):
-                prec_set_after_distribute.append(item.clone())
-
-    num_programs = sp_size + p_size + c_size
-
-    return sp_range, p_range, c_range, num_programs, prec_set_after_distribute
-
-
 def synthesize_one_iteration(
     ith_iter: int,
-    context_regular: SynthesizerContext,
-    context_weighted: SynthesizerContext,
-    context_cond: SynthesizerContext,
     random: Random,
     solution_set: SolutionSet,
     logger: logging.Logger,
     helper_funcs: HelperFuncs,
-    ctx: Context,
-    num_programs: int,
-    program_length: int,
-    cond_length: int,
-    num_abd_procs: int,
-    total_rounds: int,
     inv_temp: int,
     num_unsound_candidates: int,
+    ranges: tuple[range, range, range],
+    mcmc_samplers: list[MCMCSampler],
+    prec_set: list[FuncOp],
     bw: int,
 ) -> SolutionSet:
     "Given ith_iter, performs total_rounds mcmc sampling"
-    mcmc_samplers: list[MCMCSampler] = []
 
-    sp_range, p_range, c_range, num_programs, prec_set_after_distribute = _mcmc_setup(
-        solution_set, num_abd_procs, num_programs
-    )
-    sp_size = sp_range.stop - sp_range.start
-    p_size = p_range.stop - p_range.start
-
-    for i in range(num_programs):
-        if i in sp_range:
-            spl = MCMCSampler(
-                helper_funcs.transfer_func,
-                context_regular
-                if i < (sp_range.start + sp_range.stop) // 2
-                else context_weighted,
-                sound_and_precise_cost,
-                program_length,
-                total_rounds,
-                random_init_program=True,
-            )
-        elif i in p_range:
-            spl = MCMCSampler(
-                helper_funcs.transfer_func,
-                context_regular
-                if i < (p_range.start + p_range.stop) // 2
-                else context_weighted,
-                precise_cost,
-                program_length,
-                total_rounds,
-                random_init_program=True,
-            )
-        else:
-            spl = MCMCSampler(
-                helper_funcs.transfer_func,
-                context_cond,
-                abduction_cost,
-                cond_length,
-                total_rounds,
-                random_init_program=True,
-                is_cond=True,
-            )
-
-        mcmc_samplers.append(spl)
-
+    sp_range, p_range, c_range = ranges
+    num_programs = len(sp_range) + len(p_range) + len(c_range)
+    program_length = mcmc_samplers[0].length
+    total_rounds = mcmc_samplers[0].total_steps
     transfers = [spl.get_current() for spl in mcmc_samplers]
-    func_with_cond_lst = _build_eval_list(
-        transfers, sp_range, p_range, c_range, prec_set_after_distribute
-    )
+    func_with_cond_lst = _build_eval_list(transfers, sp_range, p_range, c_range, prec_set)
 
     cmp_results = solution_set.eval_improve(func_with_cond_lst)
 
@@ -184,7 +93,7 @@ def synthesize_one_iteration(
         transfers = [spl.sample_next().get_current() for spl in mcmc_samplers]
 
         func_with_cond_lst = _build_eval_list(
-            transfers, sp_range, p_range, c_range, prec_set_after_distribute
+            transfers, sp_range, p_range, c_range, prec_set
         )
 
         start = time.time()
@@ -262,19 +171,18 @@ def synthesize_one_iteration(
         ):
             candidates_c.append(
                 FunctionWithCondition(
-                    prec_set_after_distribute[i - sp_size - p_size],
+                    prec_set[i - len(sp_range) - len(p_range)],
                     sound_most_improve_tfs[i][0],
                 )
             )
 
-    new_solution_set: SolutionSet = solution_set.construct_new_solution_set(
+    new_solution_set = solution_set.construct_new_solution_set(
         bw,
         candidates_sp,
         candidates_p,
         candidates_c,
         helper_funcs,
         num_unsound_candidates,
-        ctx,
     )
 
     return new_solution_set

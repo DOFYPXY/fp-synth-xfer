@@ -1,62 +1,35 @@
 import logging
 from pathlib import Path
-from typing import Callable, Literal, cast
+from typing import Callable, Literal
 
 from xdsl.context import Context
 from xdsl.dialects.arith import Arith
 from xdsl.dialects.builtin import Builtin, ModuleOp, StringAttr
-from xdsl.dialects.comb import Comb
 from xdsl.dialects.func import CallOp, Func, FuncOp, ReturnOp
-from xdsl.dialects.hw import HW
 from xdsl.parser import Parser
-from xdsl_smt.dialects.index_dialect import Index
-from xdsl_smt.dialects.smt_bitvector_dialect import SMTBitVectorDialect
-from xdsl_smt.dialects.smt_dialect import SMTDialect
-from xdsl_smt.dialects.smt_utils_dialect import SMTUtilsDialect
 from xdsl_smt.dialects.transfer import AbstractValueType, Transfer, TransIntegerType
 from xdsl_smt.passes.transfer_inline import FunctionCallInline
 
 from synth_xfer._util.cond_func import FunctionWithCondition
-from synth_xfer._util.dce import TransferDeadCodeElimination
 from synth_xfer._util.eval import AbstractDomain, eval_transfer_func, setup_eval
 from synth_xfer._util.eval_result import EvalResult
 from synth_xfer._util.helper_funcs import HelperFuncs
-from synth_xfer._util.log import print_set_of_funcs_to_file, setup_loggers
+from synth_xfer._util.log import print_fns_to_file, setup_loggers
+from synth_xfer._util.mcmc_sampler import setup_mcmc
 from synth_xfer._util.one_iter import synthesize_one_iteration
 from synth_xfer._util.random import Random
-from synth_xfer._util.solution_set import SolutionSet, UnsizedSolutionSet
+from synth_xfer._util.solution_set import UnsizedSolutionSet
 from synth_xfer._util.synth_context import SynthesizerContext
 from synth_xfer.cli.args import build_parser
 from synth_xfer.jit import Jit
 from synth_xfer.lower_to_llvm import LowerToLLVM
 
 # TODO this should be made local
-# TODO I've never seen us use a lot of these dialects, let's try and cut down the list to only what we need
 ctx = Context()
 ctx.load_dialect(Arith)
 ctx.load_dialect(Builtin)
 ctx.load_dialect(Func)
-ctx.load_dialect(SMTDialect)
-ctx.load_dialect(SMTBitVectorDialect)
-ctx.load_dialect(SMTUtilsDialect)
 ctx.load_dialect(Transfer)
-ctx.load_dialect(Index)
-ctx.load_dialect(Comb)
-ctx.load_dialect(HW)
-
-# TODO removed CPPCLASS, applied_to, and is_forward attrs from my transfer functions
-# this seems like it could cause some problems later, esp in the verifyer
-
-# TODO when the new lowerer/jit is incorporated, I should run DCE on it beforehand?
-# but maybe not since llvm ir should DCE anyway so idrc
-
-
-def eliminate_dead_code(func: FuncOp) -> FuncOp:
-    """
-    WARNING: this function modifies the func passed to it in place!
-    """
-    TransferDeadCodeElimination().apply(ctx, cast(ModuleOp, func))
-    return func
 
 
 # TODO weird func
@@ -73,11 +46,7 @@ def _construct_top_func(transfer: FuncOp) -> FuncOp:
     return func
 
 
-# TODO combine this with eval_transfer_func_helper
 # TODO type toeval
-# TODO removed helper funcs, but do probs need to provide a meet function
-# also def need a top fn
-# TODO later this will need domain
 def _eval_helper(
     to_eval,
     bw: int,
@@ -318,12 +287,7 @@ def run(
         to_eval, bw, domain, helper_funcs, ret_top_func, jit
     )
 
-    solution_set: SolutionSet = UnsizedSolutionSet(
-        base_transfers,
-        solution_eval_func,
-        logger,
-        eliminate_dead_code,
-    )
+    solution_set = UnsizedSolutionSet(base_transfers, solution_eval_func, logger)
 
     # eval the initial solutions in the solution set
     init_cmp_res = solution_set.eval_improve([])[0]
@@ -352,31 +316,34 @@ def run(
             context_weighted.weighted = True
             solution_set.learn_weights(context_weighted)
 
-        solution_set = synthesize_one_iteration(
-            ith_iter,
+        mcmc_samplers, prec_set, ranges = setup_mcmc(
+            helper_funcs.transfer_func,
+            solution_set.precise_set,
+            current_num_abd_procs,
+            num_programs,
             context,
             context_weighted,
             context_cond,
+            current_prog_len,
+            current_total_rounds,
+            condition_length,
+        )
+
+        solution_set = synthesize_one_iteration(
+            ith_iter,
             random,
             solution_set,
             logger,
             helper_funcs,
-            ctx,
-            num_programs,
-            current_prog_len,
-            condition_length,
-            current_num_abd_procs,
-            current_total_rounds,
             inv_temp,
             num_unsound_candidates,
+            ranges,
+            mcmc_samplers,
+            prec_set,
             bw,
         )
 
-        print_set_of_funcs_to_file(
-            [f.to_str(eliminate_dead_code) for f in solution_set.solutions],
-            ith_iter,
-            outputs_folder,
-        )
+        print_fns_to_file(map(str, solution_set.solutions), ith_iter, outputs_folder)
 
         final_cmp_res = solution_set.eval_improve([])
         lbw_mbw_log = "\n".join(
@@ -404,9 +371,12 @@ def run(
         raise Exception("Found no solutions")
     solution_module = solution_set.generate_solution_mlir()
     _save_solution(solution_module, outputs_folder)
-    # TODO solution_str should be a fn ptr to the solution func to eval
 
-    solution_result = eval_transfer_func(to_eval, [solution_str], [])[0]
+    lowerer.add_fn(helper_funcs.meet_func)
+    lowerer.add_mod(solution_module)
+    jit.add_mod(str(lowerer))
+    solution_ptr = jit.get_fn_ptr("solution")
+    solution_result = eval_transfer_func(to_eval, [solution_ptr], [])[0]
     solution_sound = solution_result.get_sound_prop() * 100
     solution_exact = solution_result.get_exact_prop() * 100
     print(f"last_solution\t{solution_sound:.2f}%\t{solution_exact:.2f}%")

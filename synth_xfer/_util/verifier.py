@@ -47,7 +47,7 @@ from z3 import Solver, parse_smt2_string, unknown, unsat
 TMP_MODULE: list[ModuleOp] = []
 
 
-def verify_pattern(ctx: Context, op: ModuleOp, timeout: int) -> bool | None:
+def _verify_pattern(ctx: Context, op: ModuleOp, timeout: int) -> bool | None:
     cloned_op = op.clone()
     stream = StringIO()
     LowerPairs().apply(ctx, cloned_op)
@@ -67,7 +67,7 @@ def verify_pattern(ctx: Context, op: ModuleOp, timeout: int) -> bool | None:
     return r == unsat
 
 
-def lower_to_smt_module(module: ModuleOp, width: int, ctx: Context):
+def _lower_to_smt_module(module: ModuleOp, width: int, ctx: Context):
     SMTLowerer.rewrite_patterns = {**func_to_smt_patterns}
     SMTLowerer.type_lowerers = {
         IntegerType: IntegerTypeSemantics(),
@@ -82,7 +82,7 @@ def lower_to_smt_module(module: ModuleOp, width: int, ctx: Context):
     LowerEffectPass().apply(ctx, module)
 
 
-def add_poison_to_concrete_function(concrete_func: FuncOp) -> FuncOp:
+def _add_poison_to_conc_fn(concrete_func: FuncOp) -> FuncOp:
     """
     Input: a concrete function with shape (trans.integer, trans.integer) -> trans.integer
     Output: a new function with shape (tuple<trans.integer, bool>
@@ -111,7 +111,7 @@ def add_poison_to_concrete_function(concrete_func: FuncOp) -> FuncOp:
     return result_func
 
 
-def create_smt_function(func: FuncOp, width: int, ctx: Context) -> DefineFunOp:
+def _create_smt_function(func: FuncOp, width: int, ctx: Context) -> DefineFunOp:
     """
     Input: a function with type FuncOp
     Return: the function lowered to SMT dialect with specified width
@@ -122,13 +122,13 @@ def create_smt_function(func: FuncOp, width: int, ctx: Context) -> DefineFunOp:
 
     global TMP_MODULE
     TMP_MODULE.append(ModuleOp([func.clone()]))
-    lower_to_smt_module(TMP_MODULE[-1], width, ctx)
+    _lower_to_smt_module(TMP_MODULE[-1], width, ctx)
     resultFunc = TMP_MODULE[-1].ops.first
     assert isinstance(resultFunc, DefineFunOp)
     return resultFunc
 
 
-def soundness_check(
+def _soundness_check(
     smt_transfer_function: SMTTransferFunction,
     domain_constraint: FunctionCollection,
     instance_constraint: FunctionCollection,
@@ -154,10 +154,10 @@ def soundness_check(
     query_module.body.block.add_ops(added_ops)
     FunctionCallInline(True, {}).apply(ctx, query_module)
 
-    return verify_pattern(ctx, query_module, timeout)
+    return _verify_pattern(ctx, query_module, timeout)
 
 
-def verify_smt_transfer_function(
+def _verify_smt_transfer_function(
     smt_transfer_function: SMTTransferFunction,
     domain_constraint: FunctionCollection,
     instance_constraint: FunctionCollection,
@@ -168,7 +168,7 @@ def verify_smt_transfer_function(
     assert smt_transfer_function.transfer_function is not None
 
     int_attr: dict[int, int] = {}
-    soundness_result = soundness_check(
+    soundness_result = _soundness_check(
         smt_transfer_function,
         domain_constraint,
         instance_constraint,
@@ -180,7 +180,7 @@ def verify_smt_transfer_function(
     return soundness_result
 
 
-def build_init_module(
+def _build_init_module(
     transfer_function: FuncOp,
     concrete_func: FuncOp,
     helper_funcs: list[FuncOp],
@@ -192,7 +192,7 @@ def build_init_module(
     func_name_to_func: dict[str, FuncOp] = {}
     module_op = ModuleOp([])
     functions: list[FuncOp] = [transfer_function.clone()]
-    functions.append(add_poison_to_concrete_function(concrete_func))
+    functions.append(_add_poison_to_conc_fn(concrete_func))
     module_op.body.block.add_ops(functions + [func.clone() for func in helper_funcs])
     domain_constraint: FunctionCollection | None = None
     instance_constraint: FunctionCollection | None = None
@@ -224,10 +224,10 @@ def build_init_module(
             transfer_function_obj = TransferFunction(func)
         if func_name == DOMAIN_CONSTRAINT:
             assert domain_constraint is None
-            domain_constraint = FunctionCollection(func, create_smt_function, ctx)
+            domain_constraint = FunctionCollection(func, _create_smt_function, ctx)
         elif func_name == INSTANCE_CONSTRAINT:
             assert instance_constraint is None
-            instance_constraint = FunctionCollection(func, create_smt_function, ctx)
+            instance_constraint = FunctionCollection(func, _create_smt_function, ctx)
 
     assert domain_constraint is not None
     assert instance_constraint is not None
@@ -247,18 +247,19 @@ def verify_transfer_function(
     transfer_function: FuncOp,
     concrete_func: FuncOp,
     helper_funcs: list[FuncOp],
-    ctx: Context,
     min_verify_bits: int,
     max_verify_bits: int,
     timeout: int,
 ) -> int | None:
+    ctx = Context()
+
     (
         module_op,
         func_name_to_func,
         transfer_function_obj,
         domain_constraint,
         instance_constraint,
-    ) = build_init_module(transfer_function, concrete_func, helper_funcs, ctx)
+    ) = _build_init_module(transfer_function, concrete_func, helper_funcs, ctx)
 
     FunctionCallInline(False, func_name_to_func).apply(ctx, module_op)
 
@@ -273,7 +274,7 @@ def verify_transfer_function(
         concrete_func_name: str = concrete_func.sym_name.data
         assert concrete_func_name is not None
 
-        lower_to_smt_module(smt_module, width, ctx)
+        _lower_to_smt_module(smt_module, width, ctx)
 
         func_name_to_smt_func: dict[str, DefineFunOp] = {}
         for op in smt_module.ops:
@@ -317,7 +318,7 @@ def verify_transfer_function(
             smt_concrete_func,
         )
 
-        result = verify_smt_transfer_function(
+        result = _verify_smt_transfer_function(
             smt_transfer_function_obj,
             domain_constraint,
             instance_constraint,
