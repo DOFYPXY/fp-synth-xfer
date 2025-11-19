@@ -8,7 +8,7 @@ from argparse import (
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from synth_xfer._util.eval import AbstractDomain
+from synth_xfer._util.domain import AbstractDomain
 
 if TYPE_CHECKING:
     from synth_xfer._eval_engine import BW

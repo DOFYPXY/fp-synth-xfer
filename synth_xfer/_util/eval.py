@@ -1,4 +1,3 @@
-from enum import Enum
 from typing import TYPE_CHECKING, Callable, cast
 
 from synth_xfer._eval_engine import (
@@ -63,36 +62,14 @@ from synth_xfer._eval_engine import (
     eval_knownbits_32,
     eval_knownbits_64,
 )
+from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.eval_result import EvalResult, PerBitRes, get_per_bit
-from synth_xfer._util.helper_funcs import HelperFuncs
+from synth_xfer._util.parse_mlir import HelperFuncs
 from synth_xfer.jit import Jit
 from synth_xfer.lower_to_llvm import LowerToLLVM
 
 if TYPE_CHECKING:
     from synth_xfer._eval_engine import BW, Results, ToEval
-
-
-class AbstractDomain(Enum):
-    KnownBits = "KnownBits", 2
-    ConstRange = "ConstRange", 2
-    AntiRange = "AntiRange", 2
-    # TODO impl
-    # IntegerModulo = "IntegerModulo", 6
-
-    vec_size: int
-
-    def __new__(
-        cls,
-        value: str,
-        vec_size: int,
-    ):
-        obj = object.__new__(cls)
-        obj._value_ = value
-        obj.vec_size = vec_size
-        return obj
-
-    def __str__(self) -> str:
-        return self.name
 
 
 def _parse_engine_output(output: str) -> list[EvalResult]:

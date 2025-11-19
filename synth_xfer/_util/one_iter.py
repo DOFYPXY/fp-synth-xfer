@@ -6,9 +6,9 @@ from xdsl.dialects.func import FuncOp
 from synth_xfer._util.cond_func import FunctionWithCondition
 from synth_xfer._util.cost_model import decide
 from synth_xfer._util.eval_result import EvalResult
-from synth_xfer._util.helper_funcs import HelperFuncs
 from synth_xfer._util.log import get_logger
 from synth_xfer._util.mcmc_sampler import MCMCSampler
+from synth_xfer._util.parse_mlir import HelperFuncs
 from synth_xfer._util.random import Random
 from synth_xfer._util.solution_set import SolutionSet
 

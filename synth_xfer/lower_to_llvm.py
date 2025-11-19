@@ -1,15 +1,12 @@
 from functools import singledispatchmethod
-from pathlib import Path
 from typing import Callable, Protocol
 
 from llvmlite import ir
-from xdsl.context import Context
-from xdsl.dialects.arith import AndIOp, Arith, ConstantOp, OrIOp, XOrIOp
-from xdsl.dialects.builtin import Builtin, IntegerType, ModuleOp
-from xdsl.dialects.func import CallOp, Func, FuncOp, ReturnOp
+from xdsl.dialects.arith import AndIOp, ConstantOp, OrIOp, XOrIOp
+from xdsl.dialects.builtin import IntegerType, ModuleOp
+from xdsl.dialects.func import CallOp, FuncOp, ReturnOp
 from xdsl.ir import Attribute, Operation
 from xdsl.irdl import SSAValue
-from xdsl.parser import Parser
 from xdsl_smt.dialects.transfer import (
     AbstractValueType,
     AddOp,
@@ -50,7 +47,6 @@ from xdsl_smt.dialects.transfer import (
     SShlOverflowOp,
     SubOp,
     # SSubOverflowOp,
-    Transfer,
     TransIntegerType,
     TupleType,
     UAddOverflowOp,
@@ -218,27 +214,6 @@ class _OpConstraints:
         raw = raw_llvm_op(b, lhs_safe, rhs_safe)
 
         return b.select(ub_any, chosen, raw)
-
-
-# TODO this should go into a diff file
-def parse_mlir_funcs(p: Path | str) -> list[FuncOp]:
-    ctx = Context()
-    ctx.load_dialect(Arith)
-    ctx.load_dialect(Builtin)
-    ctx.load_dialect(Func)
-    ctx.load_dialect(Transfer)
-
-    func_str = p if isinstance(p, str) else p.read_text()
-    func_name = "<text>" if isinstance(p, str) else p.name
-
-    mod = Parser(ctx, func_str, func_name).parse_op()
-
-    if isinstance(mod, ModuleOp):
-        return [x for x in mod.ops if isinstance(x, FuncOp)]
-    elif isinstance(mod, FuncOp):
-        return [mod]
-    else:
-        raise ValueError(f"mlir in '{func_name}' is neither a ModuleOp, nor a FuncOp")
 
 
 def lower_type(typ: Attribute, bw: int) -> ir.Type:

@@ -2,21 +2,16 @@ from pathlib import Path
 from time import perf_counter
 from typing import TYPE_CHECKING, Callable
 
-from xdsl.context import Context
-from xdsl.dialects.arith import Arith
-from xdsl.dialects.builtin import Builtin, ModuleOp
-from xdsl.dialects.func import CallOp, Func, FuncOp, ReturnOp
-from xdsl.parser import Parser
-from xdsl_smt.dialects.transfer import AbstractValueType, Transfer, TransIntegerType
-from xdsl_smt.passes.transfer_inline import FunctionCallInline
+from xdsl.dialects.func import CallOp, FuncOp, ReturnOp
 
 from synth_xfer._util.cond_func import FunctionWithCondition
-from synth_xfer._util.eval import AbstractDomain, eval_transfer_func, setup_eval
+from synth_xfer._util.domain import AbstractDomain
+from synth_xfer._util.eval import eval_transfer_func, setup_eval
 from synth_xfer._util.eval_result import EvalResult
-from synth_xfer._util.helper_funcs import HelperFuncs
 from synth_xfer._util.log import get_logger, init_logging, write_log_file
 from synth_xfer._util.mcmc_sampler import setup_mcmc
 from synth_xfer._util.one_iter import synthesize_one_iteration
+from synth_xfer._util.parse_mlir import HelperFuncs, get_helper_funcs
 from synth_xfer._util.random import Random
 from synth_xfer._util.solution_set import UnsizedSolutionSet
 from synth_xfer._util.synth_context import SynthesizerContext
@@ -77,54 +72,6 @@ def _eval_helper(
     return helper
 
 
-def _get_helper_funcs(p: Path, d: AbstractDomain) -> HelperFuncs:
-    ctx = Context()
-    ctx.load_dialect(Arith)
-    ctx.load_dialect(Builtin)
-    ctx.load_dialect(Func)
-    ctx.load_dialect(Transfer)
-
-    with open(p, "r") as f:
-        mod = Parser(ctx, f.read(), p.name).parse_op()
-        assert isinstance(mod, ModuleOp)
-
-    fns = {x.sym_name.data: x for x in mod.ops if isinstance(x, FuncOp)}
-    FunctionCallInline(False, fns).apply(ctx, mod)
-
-    assert "concrete_op" in fns
-    crt_func = fns["concrete_op"]
-    op_con_fn = fns.get("op_constraint", None)
-
-    ty = AbstractValueType([TransIntegerType() for _ in range(d.vec_size)])
-    # this is very slightly diff then the one in niceToMeetYou so if there's a bug, check there
-    xfer_func = FuncOp.from_region("empty_transformer", [ty, ty], [ty])
-    mod.body.block.add_op(xfer_func)
-
-    # TODO this is a kinda bad hack
-    def get_domain_fns(fp: str) -> FuncOp:
-        dp = p.resolve().parent.parent.joinpath(str(d), fp)
-        with open(dp, "r") as f:
-            fn = Parser(ctx, f.read(), f.name).parse_op()
-            assert isinstance(fn, FuncOp)
-
-        return fn
-
-    top = get_domain_fns("top.mlir")
-    meet = get_domain_fns("meet.mlir")
-    constraint = get_domain_fns("get_constraint.mlir")
-    instance_constraint = get_domain_fns("get_instance_constraint.mlir")
-
-    return HelperFuncs(
-        crt_func=crt_func,
-        instance_constraint_func=instance_constraint,
-        domain_constraint_func=constraint,
-        op_constraint_func=op_con_fn,
-        get_top_func=top,
-        transfer_func=xfer_func,
-        meet_func=meet,
-    )
-
-
 def _setup_context(r: Random, use_full_i1_ops: bool) -> SynthesizerContext:
     c = SynthesizerContext(r)
     c.set_cmp_flags([0, 6, 7])
@@ -164,7 +111,7 @@ def run(
     if random_number_file is not None:
         random.read_from_file(random_number_file)
 
-    helper_funcs = _get_helper_funcs(transformer_file, domain)
+    helper_funcs = get_helper_funcs(transformer_file, domain)
 
     start_time = perf_counter()
     to_eval = setup_eval(bw, samples, random_seed, helper_funcs, domain, jit)

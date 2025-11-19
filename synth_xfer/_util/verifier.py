@@ -41,13 +41,15 @@ from xdsl_smt.utils.transfer_function_util import (
     SMTTransferFunction,
     TransferFunction,
 )
-from z3 import Solver, parse_smt2_string, unknown, unsat
+from z3 import ModelRef, Solver, parse_smt2_string, sat, unknown
 
 # TODO do we still need this
 _TMP_MODULE: list[ModuleOp] = []
 
 
-def _verify_pattern(ctx: Context, op: ModuleOp, timeout: int) -> bool | None:
+def _verify_pattern(
+    ctx: Context, op: ModuleOp, timeout: int
+) -> tuple[bool | None, ModelRef | None]:
     cloned_op = op.clone()
     LowerPairs().apply(ctx, cloned_op)
     CanonicalizePass().apply(ctx, cloned_op)
@@ -62,9 +64,11 @@ def _verify_pattern(ctx: Context, op: ModuleOp, timeout: int) -> bool | None:
     r = s.check()
 
     if r == unknown:
-        return None
-
-    return r == unsat
+        return None, None
+    elif r == sat:
+        return False, s.model()
+    else:
+        return True, None
 
 
 def _lower_to_smt_module(module: ModuleOp, width: int, ctx: Context):
@@ -135,7 +139,7 @@ def _soundness_check(
     int_attr: dict[int, int],
     ctx: Context,
     timeout: int,
-) -> bool | None:
+) -> tuple[bool | None, ModelRef | None]:
     query_module = ModuleOp([])
     if smt_transfer_function.is_forward:
         added_ops: list[Operation] = forward_soundness_check(
@@ -163,7 +167,7 @@ def _verify_smt_transfer_function(
     instance_constraint: FunctionCollection,
     ctx: Context,
     timeout: int,
-) -> bool | None:
+) -> tuple[bool | None, ModelRef | None]:
     assert smt_transfer_function.concrete_function is not None
     assert smt_transfer_function.transfer_function is not None
 
@@ -247,10 +251,9 @@ def verify_transfer_function(
     transfer_function: FuncOp,
     concrete_func: FuncOp,
     helper_funcs: list[FuncOp],
-    min_verify_bits: int,
-    max_verify_bits: int,
+    width: int,
     timeout: int,
-) -> int | None:
+) -> tuple[bool | None, ModelRef | None]:
     ctx = Context()
 
     (
@@ -263,72 +266,53 @@ def verify_transfer_function(
 
     FunctionCallInline(False, func_name_to_func).apply(ctx, module_op)
 
-    for width in range(min_verify_bits, max_verify_bits + 1):
-        smt_module = module_op.clone()
+    smt_module = module_op.clone()
 
-        # expand for loops
-        unrollTransferLoop = UnrollTransferLoop(width)
-        assert isinstance(smt_module, ModuleOp)
-        unrollTransferLoop.apply(ctx, smt_module)
+    # expand for loops
+    unrollTransferLoop = UnrollTransferLoop(width)
+    assert isinstance(smt_module, ModuleOp)
+    unrollTransferLoop.apply(ctx, smt_module)
 
-        concrete_func_name: str = concrete_func.sym_name.data
-        assert concrete_func_name is not None
+    concrete_func_name: str = concrete_func.sym_name.data
+    assert concrete_func_name is not None
 
-        _lower_to_smt_module(smt_module, width, ctx)
+    _lower_to_smt_module(smt_module, width, ctx)
 
-        func_name_to_smt_func: dict[str, DefineFunOp] = {}
-        for op in smt_module.ops:
-            if isinstance(op, DefineFunOp):
-                op_func_name = op.fun_name
-                assert op_func_name is not None
-                func_name = op_func_name.data
-                func_name_to_smt_func[func_name] = op
+    func_name_to_smt_func: dict[str, DefineFunOp] = {}
+    for op in smt_module.ops:
+        if isinstance(op, DefineFunOp):
+            op_func_name = op.fun_name
+            assert op_func_name is not None
+            func_name = op_func_name.data
+            func_name_to_smt_func[func_name] = op
 
-        func_name = transfer_function.sym_name.data
-        assert func_name is not None
+    func_name = transfer_function.sym_name.data
+    assert func_name is not None
 
-        smt_concrete_func = None
-        if concrete_func_name in func_name_to_smt_func:
-            smt_concrete_func = func_name_to_smt_func[concrete_func_name]
-        assert smt_concrete_func is not None
+    smt_concrete_func = func_name_to_smt_func.get(concrete_func_name, None)
+    assert smt_concrete_func is not None
+    smt_transfer_function = func_name_to_smt_func.get(func_name, None)
+    abs_op_constraint = func_name_to_smt_func.get("abs_op_constraint", None)
+    op_constraint = func_name_to_smt_func.get("op_constraint", None)
 
-        smt_transfer_function = None
-        if func_name in func_name_to_smt_func:
-            smt_transfer_function = func_name_to_smt_func[func_name]
+    smt_transfer_function_obj = SMTTransferFunction(
+        transfer_function_obj,
+        func_name,
+        concrete_func_name,
+        abs_op_constraint,
+        op_constraint,
+        None,
+        None,
+        None,
+        None,
+        smt_transfer_function,
+        smt_concrete_func,
+    )
 
-        abs_op_constraint = func_name_to_smt_func.get("abs_op_constraint", None)
-
-        op_constraint = func_name_to_smt_func.get("op_constraint", None)
-
-        soundness_counterexample = None
-        int_attr_arg = None
-        int_attr_constraint = None
-
-        smt_transfer_function_obj = SMTTransferFunction(
-            transfer_function_obj,
-            func_name,
-            concrete_func_name,
-            abs_op_constraint,
-            op_constraint,
-            soundness_counterexample,
-            None,
-            int_attr_arg,
-            int_attr_constraint,
-            smt_transfer_function,
-            smt_concrete_func,
-        )
-
-        result = _verify_smt_transfer_function(
-            smt_transfer_function_obj,
-            domain_constraint,
-            instance_constraint,
-            ctx,
-            timeout,
-        )
-        if result is None:
-            return None
-
-        if not result:
-            return width
-
-    return 0
+    return _verify_smt_transfer_function(
+        smt_transfer_function_obj,
+        domain_constraint,
+        instance_constraint,
+        ctx,
+        timeout,
+    )

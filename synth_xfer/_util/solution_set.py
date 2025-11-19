@@ -11,9 +11,9 @@ from synth_xfer._util.cond_func import FunctionWithCondition
 from synth_xfer._util.dce import dce
 from synth_xfer._util.eval_result import EvalResult
 from synth_xfer._util.log import get_logger, write_log_file
+from synth_xfer._util.parse_mlir import HelperFuncs
 from synth_xfer._util.synth_context import SynthesizerContext
-from synth_xfer._util.verifier import verify_transfer_function
-from synth_xfer.cli.main import HelperFuncs
+from synth_xfer.cli.verify import verify_function
 
 
 def _rename_functions(lst: list[FunctionWithCondition], prefix: str) -> list[str]:
@@ -22,30 +22,6 @@ def _rename_functions(lst: list[FunctionWithCondition], prefix: str) -> list[str
         func_names.append(prefix + str(i))
         func.set_func_name(func_names[-1])
     return func_names
-
-
-def _verify_function(
-    bw: int,
-    func: FunctionWithCondition,
-    helper_funcs: HelperFuncs,
-    timeout: int,
-) -> int | None:
-    cur_helper = [func.func]
-    if func.cond is not None:
-        cur_helper.append(func.cond)
-
-    helpers = cur_helper + [
-        helper_funcs.get_top_func,
-        helper_funcs.instance_constraint_func,
-        helper_funcs.domain_constraint_func,
-        helper_funcs.op_constraint_func,
-        helper_funcs.meet_func,
-    ]
-    helpers = [x for x in helpers if x is not None]
-
-    return verify_transfer_function(
-        func.get_function(), helper_funcs.crt_func, helpers, bw, bw, timeout
-    )
 
 
 class SolutionSet(ABC):
@@ -171,10 +147,12 @@ class UnsizedSolutionSet(SolutionSet):
     def handle_inconsistent_result(self, f: FunctionWithCondition):
         str_output = io.StringIO()
 
+        print("module {", file=str_output)
         print(dce(f.func), file=str_output)
         if f.cond is not None:
             print(dce(f.cond), file=str_output)
         print(f.get_function(), file=str_output)
+        print("}", file=str_output)
 
         write_log_file("error.mlir", str_output.getvalue())
 
@@ -215,19 +193,21 @@ class UnsizedSolutionSet(SolutionSet):
             cond_number = "None" if cand.cond is None else cand.cond.attributes["number"]
 
             if (cand in new_candidates_sp) or (cand in new_candidates_c):
-                unsound_bit = _verify_function(bw, cand, helper_funcs, timeout=200)
-                if unsound_bit is None:
+                is_sound, _ = verify_function(
+                    bw, cand.get_function(), [cand.func, cand.cond], helper_funcs, 200
+                )
+                if is_sound is None:
                     logger.info(
                         f"Skip a function of which verification timed out, body: {body_number}, cond: {cond_number}"
                     )
                     candidates.remove(cand)
                     continue
-                elif unsound_bit != 0:
+                elif not is_sound:
                     logger.info(
-                        f"Skip a unsound function at bit width {unsound_bit}, body: {body_number}, cond: {cond_number}"
+                        f"Skip a unsound function at bit width {is_sound}, body: {body_number}, cond: {cond_number}"
                     )
                     # Todo: Remove hard encoded bitwidth
-                    if unsound_bit <= 4:
+                    if bw == 4:
                         self.handle_inconsistent_result(cand)
                     candidates.remove(cand)
                     continue
