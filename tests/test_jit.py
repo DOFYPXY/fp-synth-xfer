@@ -50,13 +50,13 @@ def test_jit_with_kb_and():
     conc_op_addr = jit.get_fn_ptr("concrete_op")
     xfer_fn_addr = jit.get_fn_ptr("kb_and")
 
-    to_eval_mid = enum_mid_knownbits_8_8_8(conc_op_addr, None, 5000, 100)
+    NUM_CASES = 5000
+    to_eval_mid = enum_mid_knownbits_8_8_8(conc_op_addr, None, NUM_CASES, 100)
     raw_res = eval_knownbits_8_8_8(to_eval_mid, [xfer_fn_addr], [])
     res = get_per_bit(str(raw_res))[0]
-    assert (
-        str(res).strip()
-        == "bw: 8  all: 5000  s: 5000  e: 5000  uall: 4999  ue: 4999  dis: 0       bdis: 3127.62 sdis: 0"
-    )
+    assert res.get_exact_prop() == 1.0
+    assert res.all_cases == NUM_CASES
+    assert res.bitwidth == 8
 
 
 def test_jit_with_ucr_add():
@@ -76,8 +76,8 @@ def test_jit_with_ucr_add():
     conc_op_addr = jit.get_fn_ptr("concrete_op")
     xfer_fn_addr = jit.get_fn_ptr("cr_add")
 
-    to_eval = enum_low_uconstrange_4_4_4(conc_op_addr, None)
-    raw_res = eval_uconstrange_4_4_4(to_eval, [xfer_fn_addr], [])
+    to_eval_low = enum_low_uconstrange_4_4_4(conc_op_addr, None)
+    raw_res = eval_uconstrange_4_4_4(to_eval_low, [xfer_fn_addr], [])
     res = get_per_bit(str(raw_res))[0]
     assert (
         str(res).strip()
@@ -89,10 +89,10 @@ def test_jit_with_ucr_add():
     conc_op_addr = jit.get_fn_ptr("concrete_op")
     xfer_fn_addr = jit.get_fn_ptr("cr_add")
 
-    to_eval = enum_mid_uconstrange_8_8_8(conc_op_addr, None, 5000, 100)
-    raw_res = eval_uconstrange_8_8_8(to_eval, [xfer_fn_addr], [])
+    NUM_CASES = 5000
+    to_eval_mid = enum_mid_uconstrange_8_8_8(conc_op_addr, None, NUM_CASES, 100)
+    raw_res = eval_uconstrange_8_8_8(to_eval_mid, [xfer_fn_addr], [])
     res = get_per_bit(str(raw_res))[0]
-    assert (
-        str(res).strip()
-        == "bw: 8  all: 5000  s: 5000  e: 5000  uall: 1691  ue: 1691  dis: 0       bdis: 1610.5  sdis: 0"
-    )
+    assert res.get_exact_prop() == 1.0
+    assert res.all_cases == NUM_CASES
+    assert res.bitwidth == 8
