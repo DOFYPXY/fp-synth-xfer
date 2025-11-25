@@ -11,4 +11,4 @@
     %check = "transfer.cmp"(%arg1, %bitwidth) {predicate=9:i64}: (!transfer.integer, !transfer.integer) -> i1
     "func.return"(%check) : (i1) -> ()
   }) {function_type = (!transfer.integer, !transfer.integer) -> i1, sym_name = "op_constraint"} : () -> ()
-}) : () -> () 
+}) : () -> ()

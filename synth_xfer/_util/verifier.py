@@ -79,7 +79,11 @@ def _lower_to_smt_module(module: ModuleOp, width: int, ctx: Context):
         TransIntegerType: TransferIntegerTypeSemantics(width),
         TupleType: AbstractValueTypeSemantics(),
     }
-    SMTLowerer.op_semantics = {**arith_semantics, **transfer_semantics, **comb_semantics}
+    SMTLowerer.op_semantics = {
+        **arith_semantics,
+        **transfer_semantics,
+        **comb_semantics,
+    }
 
     LowerToSMTPass().apply(ctx, module)
     MergeFuncResultsPass().apply(ctx, module)

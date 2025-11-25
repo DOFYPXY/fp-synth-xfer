@@ -24,6 +24,7 @@ _ctx.load_dialect(Transfer)
 class _Readable(Protocol):
     @property
     def name(self) -> str: ...
+
     def read_text(self) -> str: ...
 
 
