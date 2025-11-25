@@ -66,8 +66,6 @@ class BV(Expr):
 
     def __xor__(self, other: BV) -> BV: ...
 
-    def __mul__(self, other: BV) -> BV: ...
-
     @classmethod
     def udiv(cls, lhs: BV, rhs: BV) -> BV: ...
 
@@ -236,8 +234,10 @@ def gen_ruleset():
         rewrite((x + y) - y).to(x),  # (x + y) - y = x (when no overflow)
         rewrite((x - y) + y).to(x),  # (x - y) + y = x (when no overflow)
         # Multiplication rules
-        rewrite((x * y) + (x * z)).to(x * (y + z)),  # distributivity (when no overflow)
-        rewrite((y * x) + (z * x)).to((y + z) * x),  # distributivity (when no overflow)
+        # distributivity (when no overflow)
+        rewrite((x * y) + (x * z)).to(x * (y + z)),
+        # distributivity (when no overflow)
+        rewrite((y * x) + (z * x)).to((y + z) * x),
         # Division rules - unsigned division (udiv)
         rewrite(BV.udiv(x, BV(1))).to(x),  # x / 1 = x
         rewrite(BV.udiv(x, x)).to(BV(1)),  # x / x = 1 (when x != 0)
@@ -280,7 +280,8 @@ def gen_ruleset():
         rewrite(BV.ashr(x, BV(0))).to(x),  # x >>> 0 = x
         rewrite(BV.ashr(BV(0), y)).to(BV(0)),  # 0 >>> y = 0
         # Shift cancellation rules
-        rewrite(BV.lshr(x << y, y)).to(x),  # (x << y) >> y = x (when no bits lost)
+        # (x << y) >> y = x (when no bits lost)
+        rewrite(BV.lshr(x << y, y)).to(x),
         rewrite(BV.ashr(x << y, y)).to(
             x
         ),  # (x << y) >>> y = x (when no bits lost, preserves sign)
@@ -393,7 +394,8 @@ def gen_ruleset():
         rewrite(BV.set_sign_bit(BV.set_sign_bit(x))).to(
             BV.set_sign_bit(x)
         ),  # idempotent: set_sign_bit(set_sign_bit(x)) = set_sign_bit(x)
-        rewrite(BV.set_sign_bit(BV(-1))).to(BV(-1)),  # set_sign_bit(0) = sign bit set
+        # set_sign_bit(0) = sign bit set
+        rewrite(BV.set_sign_bit(BV(-1))).to(BV(-1)),
         # Bit manipulation rules - clear_sign_bit
         rewrite(BV.clear_sign_bit(BV.clear_sign_bit(x))).to(
             BV.clear_sign_bit(x)
