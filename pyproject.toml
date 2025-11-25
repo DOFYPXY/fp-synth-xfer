@@ -1,5 +1,9 @@
 [build-system]
-requires = ["scikit-build-core>=0.9", "pybind11>=3.0", "setuptools_scm[toml]>=8"]
+requires = [
+  "scikit-build-core>=0.9",
+  "pybind11>=3.0",
+  "setuptools_scm[toml]>=8",
+]
 build-backend = "scikit_build_core.build"
 
 [project]
@@ -13,19 +17,19 @@ dependencies = [
   "xdsl-smt @ https://github.com/dominicmkennedy/xdsl-smt/archive/739aa03.tar.gz",
   "z3-solver==4.15.1.0",
   "llvmlite>=0.45.0",
+  "egglog>=1.0.0",
+  "cloudpickle",
 ]
 
 [project.optional-dependencies]
-dev = [
-  "pybind11>=3.0",
-  "pytest>=8.0",
-]
+dev = ["pybind11>=3.0", "pytest>=8.0"]
 
 [project.scripts]
 sxf = "synth_xfer.cli.sxf:main"
 benchmark = "synth_xfer.cli.benchmark:main"
 verify = "synth_xfer.cli.verify:main"
 lower-to-llvm = "synth_xfer.cli.lower_to_llvm:main"
+simplifier = "synth_xfer.cli.simplifier:main"
 
 [tool.scikit-build]
 minimum-version = "0.9"
@@ -33,10 +37,7 @@ build-dir = "build/"
 wheel.expand-macos-universal-tags = true
 wheel.packages = ["synth_xfer"]
 cmake.define = { CMAKE_EXPORT_COMPILE_COMMANDS = true }
-cmake.args = [
-  "-DCMAKE_C_COMPILER=clang",
-  "-DCMAKE_CXX_COMPILER=clang++",
-]
+cmake.args = ["-DCMAKE_C_COMPILER=clang", "-DCMAKE_CXX_COMPILER=clang++"]
 
 [tool.ruff]
 line-length = 90
