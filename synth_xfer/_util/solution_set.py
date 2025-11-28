@@ -194,8 +194,8 @@ class UnsizedSolutionSet(SolutionSet):
             body_number = cand.func.attributes["number"]
             cond_number = "None" if cand.cond is None else cand.cond.attributes["number"]
 
-            if (cand in new_candidates_sp) or (cand in new_candidates_c):
-                for bw in vbw:
+            for bw in vbw:
+                if (cand in new_candidates_sp) or (cand in new_candidates_c):
                     is_sound, _ = verify_function(
                         bw, cand.get_function(), [cand.func, cand.cond], helper_funcs, 200
                     )
