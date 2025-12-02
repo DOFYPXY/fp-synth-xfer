@@ -16,7 +16,7 @@ template <std::size_t BW> class UConstRange {
 public:
   using BV = APInt<BW>;
   static constexpr std::size_t arity = 2;
-  static constexpr const char name[] name = "UConstRange";
+  static constexpr const char name[] = "UConstRange";
 
   // ctor
   constexpr UConstRange() : v{} {}

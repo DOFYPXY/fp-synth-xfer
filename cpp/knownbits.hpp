@@ -17,7 +17,7 @@ template <std::size_t BW> class KnownBits {
 public:
   using BV = APInt<BW>;
   static constexpr std::size_t arity = 2;
-  static constexpr const char name[] name = "KnownBits";
+  static constexpr const char name[] = "KnownBits";
 
   // ctor
   constexpr KnownBits() : v{} {}
