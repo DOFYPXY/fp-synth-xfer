@@ -16,7 +16,7 @@ template <std::size_t BW> class AntiRange {
 public:
   using BV = APInt<BW>;
   static constexpr std::size_t arity = 2;
-  static constexpr std::string name = "AntiRange";
+  static constexpr const char name[] = "AntiRange";
 
   // ctor
   constexpr AntiRange() : v{} {}
