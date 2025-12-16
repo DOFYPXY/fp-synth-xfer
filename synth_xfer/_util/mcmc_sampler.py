@@ -22,17 +22,15 @@ from synth_xfer._util.cost_model import (
     precise_cost,
     sound_and_precise_cost,
 )
-from synth_xfer._util.dsl_operators import BINT_T, BOOL_T, INT_T
+from synth_xfer._util.dsl_operators import BOOL_T, INT_T, get_operand_kinds
 from synth_xfer._util.eval_result import EvalResult
 from synth_xfer._util.mutation_program import MutationProgram
 from synth_xfer._util.random import Random
 from synth_xfer._util.synth_context import (
     SynthesizerContext,
-    get_op_with_signature,
     get_ret_type,
     is_int_op,
     not_in_main_body,
-    set_ret_type,
 )
 
 
@@ -100,24 +98,24 @@ class MCMCSampler:
         """
         old_op = self.current.ops[idx]
         valid_operands = {
-            ty: self.current.get_valid_operands(idx, ty) for ty in [INT_T, BOOL_T, BINT_T]
+            ty: self.current.get_valid_operands(idx, ty) for ty in [INT_T, BOOL_T]
         }
         new_op = None
         while new_op is None:
             new_op = self.context.get_random_op(get_ret_type(old_op), valid_operands)
 
-        self.current.replace_operation(old_op, new_op, history)
+        self.current.subst_operation(old_op, new_op, history)
 
     def replace_operand(self, idx: int, history: bool):
         op = self.current.ops[idx]
         new_op = op.clone()
 
-        self.current.replace_operation(op, new_op, history)
+        self.current.subst_operation(op, new_op, history)
 
         ith = self.context.random.randint(0, len(op.operands) - 1)
-        op_w_sig = get_op_with_signature(op)
+        operand_kinds = get_operand_kinds(type(op))
 
-        vals = self.current.get_valid_operands(idx, op_w_sig[1][ith])
+        vals = self.current.get_valid_operands(idx, operand_kinds[ith])
 
         success = False
         while not success:
@@ -137,7 +135,6 @@ class MCMCSampler:
             if isinstance(arg.type, AbstractValueType):
                 for i, field_type in enumerate(arg.type.get_fields()):
                     op = GetOp(arg, i)
-                    set_ret_type(op, INT_T)
                     block.add_op(op)
 
         assert isinstance(block.last_op, GetOp)
@@ -147,30 +144,18 @@ class MCMCSampler:
         true: arith.ConstantOp = arith.ConstantOp(
             IntegerAttr.from_int_and_width(1, 1), i1
         )
-        set_ret_type(true, BOOL_T)
         false: arith.ConstantOp = arith.ConstantOp(
             IntegerAttr.from_int_and_width(0, 1), i1
         )
-        set_ret_type(false, BOOL_T)
         all_ones = GetAllOnesOp(tmp_int_ssavalue)
-        set_ret_type(all_ones, INT_T)
         zero = Constant(tmp_int_ssavalue, 0)
-        set_ret_type(zero, INT_T)
         one = Constant(tmp_int_ssavalue, 1)
-        set_ret_type(one, INT_T)
-        zero_bint = Constant(tmp_int_ssavalue, 0)
-        set_ret_type(zero_bint, BINT_T)
-        one_bint = Constant(tmp_int_ssavalue, 1)
-        set_ret_type(one_bint, BINT_T)
         get_bw = GetBitWidthOp(tmp_int_ssavalue)
-        set_ret_type(get_bw, BINT_T)
         block.add_op(true)
         block.add_op(false)
         block.add_op(zero)
         block.add_op(one)
         block.add_op(all_ones)
-        block.add_op(zero_bint)
-        block.add_op(one_bint)
         block.add_op(get_bw)
 
         if not self.is_cond:
@@ -179,19 +164,15 @@ class MCMCSampler:
             for i in range(length):
                 if i % 4 == 0:
                     nop_bool = CmpOp(tmp_int_ssavalue, tmp_int_ssavalue, 0)
-                    set_ret_type(nop_bool, BOOL_T)
                     block.add_op(nop_bool)
                 elif i % 4 == 1:
-                    bint_nop = AddOp(tmp_int_ssavalue, tmp_int_ssavalue)
-                    set_ret_type(bint_nop, BINT_T)
-                    block.add_op(bint_nop)
+                    int_nop = AddOp(tmp_int_ssavalue, tmp_int_ssavalue)
+                    block.add_op(int_nop)
                 elif i % 4 == 2:
                     last_int_op = AndOp(tmp_int_ssavalue, tmp_int_ssavalue)
-                    set_ret_type(last_int_op, INT_T)
                     block.add_op(last_int_op)
                 else:
                     last_int_op = AndOp(tmp_int_ssavalue, tmp_int_ssavalue)
-                    set_ret_type(last_int_op, INT_T)
                     block.add_op(last_int_op)
 
             # Part IV: MakeOp
@@ -217,11 +198,9 @@ class MCMCSampler:
             for i in range(length):
                 if i % 4 == 0:
                     last_int_op = AndOp(tmp_int_ssavalue, tmp_int_ssavalue)
-                    set_ret_type(last_int_op, INT_T)
                     block.add_op(last_int_op)
                 else:
                     last_bool_op = CmpOp(tmp_int_ssavalue, tmp_int_ssavalue, 0)
-                    set_ret_type(last_bool_op, BOOL_T)
                     block.add_op(last_bool_op)
 
             return_val = last_bool_op.results[0]

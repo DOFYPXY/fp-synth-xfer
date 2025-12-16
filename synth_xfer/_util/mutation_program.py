@@ -74,12 +74,12 @@ class MutationProgram:
     def revert_operation(self):
         assert self.old_op is not None
         assert self.new_op is not None
-        self.replace_operation(self.new_op, self.old_op, False)
+        self.subst_operation(self.new_op, self.old_op, False)
         self.new_op.erase()
         self.new_op = None
         self.old_op = None
 
-    def replace_operation(self, old_op: Operation, new_op: Operation, history: bool):
+    def subst_operation(self, old_op: Operation, new_op: Operation, history: bool):
         """
         Replace the old_op with the given new operation.
         """

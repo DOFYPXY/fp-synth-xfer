@@ -1,10 +1,9 @@
 from typing import Callable, Generic, TypeVar
 
 import xdsl.dialects.arith as arith
-from xdsl.dialects.builtin import ArrayAttr, IntegerAttr, StringAttr
+from xdsl.dialects.builtin import IntegerAttr, i1
 from xdsl.dialects.func import FuncOp, ReturnOp
-from xdsl.ir import Attribute, Operation, SSAValue
-from xdsl.utils.hints import isa
+from xdsl.ir import Operation, SSAValue
 from xdsl_smt.dialects.transfer import (
     AddOp,
     AndOp,
@@ -40,17 +39,14 @@ from xdsl_smt.dialects.transfer import (
 )
 
 from synth_xfer._util.dsl_operators import (
-    BINT_T,
     BOOL_T,
     INT_T,
-    OpWithSignature,
     basic_i1_ops,
     basic_int_ops,
-    bint_prior_uniform,
-    enable_bint,
-    full_bint_ops,
     full_i1_ops,
     full_int_ops,
+    get_operand_kinds,
+    get_result_kind,
     i1_prior_uniform,
     int_prior_uniform,
 )
@@ -243,29 +239,11 @@ Idempotent property means we should not use the same operand for both operand.
 """
 
 
-def set_ret_type(op: Operation, ret_type: str):
-    op.attributes["ret_type"] = StringAttr(ret_type)
-
-
-def set_signature_attr(op: Operation, sig: OpWithSignature, ret_type: str):
-    set_ret_type(op, ret_type)
-    op.attributes["input_type"] = ArrayAttr(StringAttr(ty) for ty in sig[1])
-
-
 def get_ret_type(op: Operation) -> str:
-    assert "ret_type" in op.attributes
-    assert isa(ret_type := op.attributes["ret_type"], StringAttr)
-    return ret_type.data
-
-
-def get_op_with_signature(op: Operation) -> OpWithSignature:
-    assert "input_type" in op.attributes
-    assert isa(input_type := op.attributes["input_type"], ArrayAttr[Attribute])
-    sig: list[str] = []
-    for ty in input_type.data:
-        assert isa(ty, StringAttr)
-        sig.append(ty.data)
-    return type(op), tuple(sig)
+    if isinstance(op, arith.ConstantOp):
+        if op.results and op.results[0].type == i1:
+            return BOOL_T
+    return get_result_kind(type(op))
 
 
 def is_int_op(op: Operation) -> bool:
@@ -274,10 +252,6 @@ def is_int_op(op: Operation) -> bool:
 
 def is_i1_op(op: Operation) -> bool:
     return get_ret_type(op) == BOOL_T
-
-
-def is_bint_op(op: Operation) -> bool:
-    return get_ret_type(op) == BINT_T
 
 
 def is_of_type(op: Operation, ty: str) -> bool:
@@ -300,8 +274,8 @@ def not_in_main_body(op: Operation):
 class SynthesizerContext:
     random: Random
     cmp_flags: list[int]
-    dsl_ops: dict[str, Collection[OpWithSignature]]
-    op_weights: dict[str, dict[OpWithSignature, int]]
+    dsl_ops: dict[str, Collection[type[Operation]]]
+    op_weights: dict[str, dict[type[Operation], int]]
     weighted: bool
     commutative: bool = False
     idempotent: bool = True
@@ -320,9 +294,6 @@ class SynthesizerContext:
         self.dsl_ops[INT_T] = Collection(full_int_ops, self.random)
         self.op_weights[BOOL_T] = i1_prior_uniform
         self.op_weights[INT_T] = int_prior_uniform
-        if enable_bint:
-            self.dsl_ops[BINT_T] = Collection(full_bint_ops, self.random)
-            self.op_weights[BINT_T] = bint_prior_uniform
 
         self.weighted = weighted
 
@@ -332,7 +303,7 @@ class SynthesizerContext:
     def use_basic_i1_ops(self):
         self.dsl_ops[BOOL_T] = Collection(basic_i1_ops, self.random)
 
-    def update_weights(self, frequency: dict[str, dict[OpWithSignature, int]]):
+    def update_weights(self, frequency: dict[str, dict[type[Operation], int]]):
         for ty, freq in frequency.items():
             self.op_weights[ty] = {key: 1 for key in self.dsl_ops[ty].get_all_elements()}
             for key, val in freq.items():
@@ -483,22 +454,21 @@ class SynthesizerContext:
         op_type: str,
         vals: dict[str, list[SSAValue]],
     ) -> Operation | None:
-        result_op_w_sig = (
+        result_op_type = (
             self.dsl_ops[op_type].get_weighted_random_element(self.op_weights[op_type])
             if self.weighted
             else self.dsl_ops[op_type].get_random_element()
         )
 
-        assert result_op_w_sig is not None
-        operands_vals = tuple(vals[t] for t in result_op_w_sig[1])
+        assert result_op_type is not None
+        operand_kinds = get_operand_kinds(result_op_type)
+        operands_vals = tuple(vals[t] for t in operand_kinds)
         if op_type == BOOL_T:
-            ret_op = self.build_i1_op(result_op_w_sig[0], operands_vals)
-        elif op_type == INT_T or op_type == BINT_T:
-            ret_op = self.build_int_op(result_op_w_sig[0], operands_vals)
+            ret_op = self.build_i1_op(result_op_type, operands_vals)
+        elif op_type == INT_T:
+            ret_op = self.build_int_op(result_op_type, operands_vals)
         else:
             assert False
-        if ret_op is not None:
-            set_signature_attr(ret_op, result_op_w_sig, op_type)
         return ret_op
 
     def replace_operand(self, op: Operation, ith: int, vals: list[SSAValue]):
@@ -538,21 +508,15 @@ class SynthesizerContext:
     @staticmethod
     def count_op_frequency(
         funcs: list[FuncOp],
-    ) -> dict[str, dict[OpWithSignature, int]]:
-        freq: dict[str, dict[OpWithSignature, int]] = {
-            INT_T: {},
-            BOOL_T: {},
-            BINT_T: {},
-        }
+    ) -> dict[str, dict[type[Operation], int]]:
+        freq: dict[str, dict[type[Operation], int]] = {INT_T: {}, BOOL_T: {}}
         for func in funcs:
             for op in func.body.block.ops:
                 if not_in_main_body(op):
                     continue
-                op_w_sig = get_op_with_signature(op)
-                if op_w_sig in full_int_ops:
-                    freq[INT_T][op_w_sig] = freq[INT_T].get(op_w_sig, 0) + 1
-                if op_w_sig in full_i1_ops:
-                    freq[BOOL_T][op_w_sig] = freq[BOOL_T].get(op_w_sig, 0) + 1
-                if enable_bint and op_w_sig in full_bint_ops:
-                    freq[BINT_T][op_w_sig] = freq[BINT_T].get(op_w_sig, 0) + 1
+                op_type = type(op)
+                if op_type in full_int_ops:
+                    freq[INT_T][op_type] = freq[INT_T].get(op_type, 0) + 1
+                if op_type in full_i1_ops:
+                    freq[BOOL_T][op_type] = freq[BOOL_T].get(op_type, 0) + 1
         return freq
