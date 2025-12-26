@@ -40,15 +40,16 @@ from xdsl_smt.dialects.transfer import (
 
 from synth_xfer._util.dsl_operators import (
     BOOL_T,
+    DEFAULT_DSL_OPS,
     INT_T,
+    DslOpSet,
     basic_i1_ops,
     basic_int_ops,
     full_i1_ops,
     full_int_ops,
     get_operand_kinds,
     get_result_kind,
-    i1_prior_uniform,
-    int_prior_uniform,
+    make_uniform_weights,
 )
 from synth_xfer._util.random import Random
 
@@ -284,24 +285,28 @@ class SynthesizerContext:
     def __init__(
         self,
         random: Random,
+        dsl_ops: DslOpSet | None = None,
         weighted: bool = False,
     ):
         self.random = random
         self.cmp_flags = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
         self.dsl_ops = dict()
         self.op_weights = dict()
-        self.dsl_ops[BOOL_T] = Collection(full_i1_ops, self.random)
-        self.dsl_ops[INT_T] = Collection(full_int_ops, self.random)
-        self.op_weights[BOOL_T] = i1_prior_uniform
-        self.op_weights[INT_T] = int_prior_uniform
+        active_ops = dsl_ops or DEFAULT_DSL_OPS
+        self._set_ops_for_kind(BOOL_T, active_ops[BOOL_T])
+        self._set_ops_for_kind(INT_T, active_ops[INT_T])
 
         self.weighted = weighted
 
+    def _set_ops_for_kind(self, kind: str, ops: list[type[Operation]]):
+        self.dsl_ops[kind] = Collection(ops, self.random)
+        self.op_weights[kind] = make_uniform_weights(ops)
+
     def use_basic_int_ops(self):
-        self.dsl_ops[INT_T] = Collection(basic_int_ops, self.random)
+        self._set_ops_for_kind(INT_T, basic_int_ops)
 
     def use_basic_i1_ops(self):
-        self.dsl_ops[BOOL_T] = Collection(basic_i1_ops, self.random)
+        self._set_ops_for_kind(BOOL_T, basic_i1_ops)
 
     def update_weights(self, frequency: dict[str, dict[type[Operation], int]]):
         for ty, freq in frequency.items():

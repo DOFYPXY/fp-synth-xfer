@@ -1,3 +1,7 @@
+import json
+from pathlib import Path
+from typing import Dict, List
+
 from xdsl.dialects import arith
 from xdsl.ir import Operation
 from xdsl_smt.dialects.transfer import (
@@ -37,6 +41,73 @@ from xdsl_smt.dialects.transfer import (
 
 INT_T = "int"
 BOOL_T = "bool"
+
+
+DslOpSet = Dict[str, List[type[Operation]]]
+
+_OP_NAME_MAP: dict[str, type[Operation]] = {
+    "CmpOp": CmpOp,
+    "arith.AndIOp": arith.AndIOp,
+    "arith.OrIOp": arith.OrIOp,
+    "arith.XOrIOp": arith.XOrIOp,
+    "NegOp": NegOp,
+    "AndOp": AndOp,
+    "OrOp": OrOp,
+    "XorOp": XorOp,
+    "AddOp": AddOp,
+    "SubOp": SubOp,
+    "SelectOp": SelectOp,
+    "LShrOp": LShrOp,
+    "AShrOp": AShrOp,
+    "ShlOp": ShlOp,
+    "UMinOp": UMinOp,
+    "UMaxOp": UMaxOp,
+    "SMinOp": SMinOp,
+    "SMaxOp": SMaxOp,
+    "UDivOp": UDivOp,
+    "SDivOp": SDivOp,
+    "URemOp": URemOp,
+    "SRemOp": SRemOp,
+    "MulOp": MulOp,
+    "SetHighBitsOp": SetHighBitsOp,
+    "SetLowBitsOp": SetLowBitsOp,
+    "ClearHighBitsOp": ClearHighBitsOp,
+    "ClearLowBitsOp": ClearLowBitsOp,
+    "SetSignBitOp": SetSignBitOp,
+    "ClearSignBitOp": ClearSignBitOp,
+    "CountLOneOp": CountLOneOp,
+    "CountLZeroOp": CountLZeroOp,
+    "CountROneOp": CountROneOp,
+    "CountRZeroOp": CountRZeroOp,
+    "PopCountOp": PopCountOp,
+}
+
+
+def load_dsl_ops(path: Path) -> DslOpSet:
+    """Load DSL op sets from a JSON file (e.g., dsl/ops_set_*.json)."""
+    with path.open() as f:
+        data = json.load(f)
+
+    def _load_kind(kind: str) -> list[type[Operation]]:
+        ops: list[type[Operation]] = []
+        for entry in data.get(kind, []):
+            if isinstance(entry, str):
+                op_name = entry
+            elif isinstance(entry, dict) and "op_name" in entry:
+                # Backward compatibility with older JSON shape.
+                op_name = entry["op_name"]
+            else:
+                raise ValueError(
+                    f"Invalid DSL op entry for '{kind}' in {path}: {entry!r}"
+                )
+            if op_name not in _OP_NAME_MAP:
+                raise ValueError(f"Unknown op_name '{op_name}' in {path}")
+            op_type = _OP_NAME_MAP[op_name]
+            if op_type not in ops:
+                ops.append(op_type)
+        return ops
+
+    return {INT_T: _load_kind("int_ops"), BOOL_T: _load_kind("i1_ops")}
 
 
 def get_operand_kinds(op_type: type[Operation]) -> tuple[str, ...]:
@@ -167,11 +238,21 @@ basic_i1_ops: list[type[Operation]] = [
 ]
 
 
-i1_prior_uniform: dict[type[Operation], int] = {k: 1 for k in full_i1_ops}
+def make_uniform_weights(
+    ops: list[type[Operation]], weight: int = 1
+) -> dict[type[Operation], int]:
+    return {op: weight for op in ops}
 
-int_prior_uniform: dict[type[Operation], int] = {k: 1 for k in full_int_ops}
 
-int_prior_uniform_stronger: dict[type[Operation], int] = {k: 10 for k in full_int_ops}
+DEFAULT_DSL_OPS: DslOpSet = {INT_T: full_int_ops, BOOL_T: full_i1_ops}
+
+i1_prior_uniform: dict[type[Operation], int] = make_uniform_weights(full_i1_ops)
+
+int_prior_uniform: dict[type[Operation], int] = make_uniform_weights(full_int_ops)
+
+int_prior_uniform_stronger: dict[type[Operation], int] = make_uniform_weights(
+    full_int_ops, weight=10
+)
 
 int_prior_bias: dict[type[Operation], int] = {
     NegOp: 10,

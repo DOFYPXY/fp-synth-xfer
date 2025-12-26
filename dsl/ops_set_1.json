@@ -1,0 +1,26 @@
+{
+  "i1_ops": ["CmpOp", "arith.AndIOp", "arith.OrIOp", "arith.XOrIOp"],
+  "int_ops": [
+    "NegOp",
+    "AndOp",
+    "OrOp",
+    "XorOp",
+    "AddOp",
+    "SubOp",
+    "SelectOp",
+    "LShrOp",
+    "ShlOp",
+    "UMinOp",
+    "UMaxOp",
+    "SMinOp",
+    "SMaxOp",
+    "SetHighBitsOp",
+    "SetLowBitsOp",
+    "ClearHighBitsOp",
+    "ClearLowBitsOp",
+    "CountLOneOp",
+    "CountLZeroOp",
+    "CountROneOp",
+    "CountRZeroOp"
+  ]
+}

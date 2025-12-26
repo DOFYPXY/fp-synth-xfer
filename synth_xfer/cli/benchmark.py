@@ -47,6 +47,7 @@ def synth_run(
             random_seed=args.random_seed,
             random_number_file=None,
             transformer_file=tf_path,
+            dsl_ops_path=args.dsl_ops,
             weighted_dsl=args.weighted_dsl,
             num_unsound_candidates=args.num_unsound_candidates,
             optimize=args.optimize,

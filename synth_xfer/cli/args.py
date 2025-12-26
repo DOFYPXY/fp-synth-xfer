@@ -193,6 +193,12 @@ def build_parser(prog: str) -> Namespace:
             help="Abstract Domain to evaluate",
         )
 
+    p.add_argument(
+        "-dsl_ops",
+        type=Path,
+        help="Path to DSL op-set JSON (e.g., dsl/ops_set_0.json)",
+    )
+
     if prog == "benchmark":
         p.add_argument(
             "-kb-eval",

@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Callable
 
 from synth_xfer._util.cond_func import FunctionWithCondition
 from synth_xfer._util.domain import AbstractDomain
+from synth_xfer._util.dsl_operators import DslOpSet, load_dsl_ops
 from synth_xfer._util.eval import eval_transfer_func, setup_eval
 from synth_xfer._util.eval_result import EvalResult
 from synth_xfer._util.jit import Jit
@@ -62,10 +63,12 @@ def _eval_helper(
     return helper
 
 
-def _setup_context(r: Random, use_full_i1_ops: bool) -> SynthesizerContext:
-    c = SynthesizerContext(r)
+def _setup_context(
+    r: Random, use_full_i1_ops: bool, dsl_ops: DslOpSet | None
+) -> SynthesizerContext:
+    c = SynthesizerContext(r, dsl_ops=dsl_ops)
     c.set_cmp_flags([0, 6, 7])
-    if not use_full_i1_ops:
+    if not use_full_i1_ops and dsl_ops is None:
         c.use_basic_i1_ops()
     return c
 
@@ -86,6 +89,7 @@ def run(
     random_seed: int | None,
     random_number_file: str | None,
     transformer_file: Path,
+    dsl_ops_path: Path | None,
     weighted_dsl: bool,
     num_unsound_candidates: int,
     optimize: bool,
@@ -93,6 +97,7 @@ def run(
 ) -> EvalResult:
     logger = get_logger()
     jit = Jit()
+    dsl_ops: DslOpSet | None = load_dsl_ops(dsl_ops_path) if dsl_ops_path else None
 
     EvalResult.init_bw_settings(
         set(lbw), set([t[0] for t in mbw]), set([t[0] for t in hbw])
@@ -116,9 +121,9 @@ def run(
     solution_eval_func = _eval_helper(to_eval, all_bws, helper_funcs, jit)
     solution_set = UnsizedSolutionSet([], solution_eval_func, optimize=optimize)
 
-    context = _setup_context(random, False)
-    context_weighted = _setup_context(random, False)
-    context_cond = _setup_context(random, True)
+    context = _setup_context(random, False, dsl_ops)
+    context_weighted = _setup_context(random, False, dsl_ops)
+    context_cond = _setup_context(random, True, dsl_ops)
 
     start_time = perf_counter()
     init_cmp_res = solution_set.eval_improve([])[0]
@@ -263,6 +268,7 @@ def main() -> None:
         random_seed=args.random_seed,
         random_number_file=args.random_file,
         transformer_file=op_path,
+        dsl_ops_path=args.dsl_ops,
         weighted_dsl=args.weighted_dsl,
         num_unsound_candidates=args.num_unsound_candidates,
         optimize=args.optimize,

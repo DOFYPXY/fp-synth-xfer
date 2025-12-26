@@ -1,0 +1,21 @@
+{
+  "i1_ops": ["CmpOp", "arith.AndIOp", "arith.OrIOp", "arith.XOrIOp"],
+  "int_ops": [
+    "NegOp",
+    "AndOp",
+    "OrOp",
+    "XorOp",
+    "AddOp",
+    "SubOp",
+    "SelectOp",
+    "MulOp",
+    "UMinOp",
+    "UMaxOp",
+    "SMinOp",
+    "SMaxOp",
+    "UDivOp",
+    "SDivOp",
+    "URemOp",
+    "SRemOp"
+  ]
+}
