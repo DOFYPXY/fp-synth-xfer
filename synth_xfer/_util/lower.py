@@ -7,7 +7,6 @@ from xdsl.dialects.builtin import IntegerType, ModuleOp
 from xdsl.dialects.func import CallOp, FuncOp, ReturnOp
 from xdsl.ir import Attribute, Operation
 from xdsl.irdl import SSAValue
-from synth_xfer.dialects.fp import AddOp as FPAddOp, SubOp as FPSubOp, FloatType
 from xdsl_smt.dialects.transfer import (
     AbstractValueType,
     AddOp,
@@ -59,6 +58,20 @@ from xdsl_smt.dialects.transfer import (
     UShlOverflowOp,
     USubOverflowOp,
     XorOp,
+)
+
+from synth_xfer.dialects.fp import (
+    FloatType,
+    FPAbsOp,
+    FPAddOp,
+    FPConstantOp,
+    FPDivOp,
+    FPMaxOp,
+    FPMinOp,
+    FPMulOp,
+    FPNegOp,
+    FPSqrtOp,
+    FPSubOp,
 )
 
 
@@ -312,9 +325,13 @@ class _LowerFuncToLLVM:
         XOrIOp: ir.IRBuilder.xor,
         SubOp: ir.IRBuilder.sub,
         MulOp: ir.IRBuilder.mul,
+        # unary floating point operations
+        FPNegOp: ir.IRBuilder.fneg,  # Handled separately in add_op
         # binary floating point operations
         FPAddOp: ir.IRBuilder.fadd,
         FPSubOp: ir.IRBuilder.fsub,
+        FPMulOp: ir.IRBuilder.fmul,
+        FPDivOp: ir.IRBuilder.fdiv,
         # ternery
         SelectOp: ir.IRBuilder.select,
     }
@@ -472,6 +489,68 @@ class _LowerFuncToLLVM:
     @add_op.register
     def _(self, op: ReturnOp) -> None:
         self.b.ret(self.operands(op)[0])
+
+    @add_op.register
+    def _(self, op: FPAbsOp) -> None:
+        res_name = self.result_name(op)
+        operand = self.operands(op)[0]
+        # Use LLVM's fabs intrinsic
+        fabs_fn = ir.Function(
+            self.llvm_mod,
+            ir.FunctionType(ir.HalfType(), [ir.HalfType()]),
+            name="llvm.fabs.f16",
+        )
+        self.ssa_map[op.results[0]] = self.b.call(fabs_fn, [operand], name=res_name)
+
+    @add_op.register
+    def _(self, op: FPConstantOp) -> None:
+        val: float = op.value.value.data
+        self.ssa_map[op.results[0]] = ir.Constant(ir.HalfType(), val)
+
+    @add_op.register
+    def _(self, op: FPNegOp) -> None:
+        res_name = self.result_name(op)
+        operand = self.operands(op)[0]
+        # fneg in llvmlite returns None, so use it without name
+        result = self.b.fneg(operand)
+        if result is not None:
+            self.ssa_map[op.results[0]] = result
+
+    @add_op.register
+    def _(self, op: FPSqrtOp) -> None:
+        res_name = self.result_name(op)
+        operand = self.operands(op)[0]
+        # Use LLVM's sqrt intrinsic
+        sqrt_fn = ir.Function(
+            self.llvm_mod,
+            ir.FunctionType(ir.HalfType(), [ir.HalfType()]),
+            name="llvm.sqrt.f16",
+        )
+        self.ssa_map[op.results[0]] = self.b.call(sqrt_fn, [operand], name=res_name)
+
+    @add_op.register
+    def _(self, op: FPMaxOp) -> None:
+        res_name = self.result_name(op)
+        lhs, rhs = self.operands(op)
+        # Use LLVM's maxnum intrinsic
+        maxnum_fn = ir.Function(
+            self.llvm_mod,
+            ir.FunctionType(ir.HalfType(), [ir.HalfType(), ir.HalfType()]),
+            name="llvm.maxnum.f16",
+        )
+        self.ssa_map[op.results[0]] = self.b.call(maxnum_fn, [lhs, rhs], name=res_name)
+
+    @add_op.register
+    def _(self, op: FPMinOp) -> None:
+        res_name = self.result_name(op)
+        lhs, rhs = self.operands(op)
+        # Use LLVM's minnum intrinsic
+        minnum_fn = ir.Function(
+            self.llvm_mod,
+            ir.FunctionType(ir.HalfType(), [ir.HalfType(), ir.HalfType()]),
+            name="llvm.minnum.f16",
+        )
+        self.ssa_map[op.results[0]] = self.b.call(minnum_fn, [lhs, rhs], name=res_name)
 
     @add_op.register
     def _(
