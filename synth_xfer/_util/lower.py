@@ -7,6 +7,7 @@ from xdsl.dialects.builtin import IntegerType, ModuleOp
 from xdsl.dialects.func import CallOp, FuncOp, ReturnOp
 from xdsl.ir import Attribute, Operation
 from xdsl.irdl import SSAValue
+from synth_xfer.dialects.fp import AddOp as FPAddOp, SubOp as FPSubOp, FloatType
 from xdsl_smt.dialects.transfer import (
     AbstractValueType,
     AddOp,
@@ -67,6 +68,9 @@ def lower_type(typ: Attribute, bw: int) -> ir.Type:
         return ir.IntType(bw)
     elif isinstance(typ, IntegerType):
         return ir.IntType(typ.width.data)
+    elif isinstance(typ, FloatType):
+        # Assume fp16 for floating point types
+        return ir.HalfType()
     elif isinstance(typ, AbstractValueType) or isinstance(typ, TupleType):
         fields = typ.get_fields()
         sub_type = lower_type(fields[0], bw)
@@ -298,7 +302,7 @@ class _LowerFuncToLLVM:
         # unary
         NegOp: ir.IRBuilder.not_,
         PopCountOp: ir.IRBuilder.ctpop,
-        # binary
+        # binary integer operations
         AndOp: ir.IRBuilder.and_,
         AndIOp: ir.IRBuilder.and_,
         AddOp: ir.IRBuilder.add,
@@ -308,6 +312,9 @@ class _LowerFuncToLLVM:
         XOrIOp: ir.IRBuilder.xor,
         SubOp: ir.IRBuilder.sub,
         MulOp: ir.IRBuilder.mul,
+        # binary floating point operations
+        FPAddOp: ir.IRBuilder.fadd,
+        FPSubOp: ir.IRBuilder.fsub,
         # ternery
         SelectOp: ir.IRBuilder.select,
     }
