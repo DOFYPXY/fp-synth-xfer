@@ -183,7 +183,7 @@ def build_parser(prog: str) -> Namespace:
     p = ArgumentParser(prog=prog, formatter_class=ArgumentDefaultsHelpFormatter)
 
     if prog == "synth_xfer":
-        p.add_argument("transfer-functions", type=Path, help="path to transfer function")
+        p.add_argument("transfer_functions", type=Path, help="path to transfer function")
         p.add_argument("-random-file", type=FileType("r"), help="file for preset rng")
         p.add_argument(
             "-domain",

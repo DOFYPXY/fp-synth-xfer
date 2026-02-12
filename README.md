@@ -30,7 +30,7 @@ pytest
 Here's a simple invocation of the `sxf` CLI for quick testing:
 
 ```bash
-sxf mlir/Operations/And.mlir -o outputs/And -domain KnownBits -num_iters 2 -num_steps 100 -num_mcmc 50 -random_seed 2333
+sxf mlir/Operations/And.mlir -o outputs/And -domain KnownBits -num-iters 2 -num-steps 100 -num-mcmc 50 -random-seed 2333
 ```
 
 Output:
@@ -48,7 +48,7 @@ The command reads the MLIR program `mlir/Operations/And.mlir` and writes outputs
 This is a more comprehensive invocation closer to the experiment setup used in the paper:
 
 ```bash
-sxf mlir/Operations/Add.mlir -o outputs/Add -domain KnownBits -num_iters 5 -num_steps 1000 -num_mcmc 100 -mbw 8,5000 16,5000 -hbw 32,5000,10000 64,5000,10000 -vbw 4,8,16,32,64
+sxf mlir/Operations/Add.mlir -o outputs/Add -domain KnownBits -num-iters 5 -num-steps 1000 -num-mcmc 100 -mbw 8,5000 16,5000 -hbw 32,5000,10000 64,5000,10000 -vbw 4,8,16,32,64
 ```
 
 ## CLI options (example flags explained)
