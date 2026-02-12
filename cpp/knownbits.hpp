@@ -12,6 +12,8 @@
 #include "domain.hpp"
 #include "pdep.hpp"
 
+using namespace DomainHelpers;
+
 template <std::size_t BW> class KnownBits {
 public:
   using BV = APInt<BW>;
@@ -47,22 +49,22 @@ public:
   }
   bool constexpr isBottom() const noexcept { return zero().intersects(one()); }
 
-  constexpr KnownBits meet(const KnownBits &rhs) const noexcept {
+  const constexpr KnownBits meet(const KnownBits &rhs) const noexcept {
     return KnownBits({zero() | rhs.zero(), one() | rhs.one()});
   }
 
-  constexpr KnownBits join(const KnownBits &rhs) const noexcept {
+  const constexpr KnownBits join(const KnownBits &rhs) const noexcept {
     return KnownBits({zero() & rhs.zero(), one() & rhs.one()});
   }
 
-  constexpr std::vector<APInt<BW>> toConcrete() const {
+  const constexpr std::vector<APInt<BW>> toConcrete() const noexcept {
     std::vector<APInt<BW>> res;
     const APInt<BW> unknown_bits = ~(zero() | one());
     const std::uint32_t num_unknown_bits = unknown_bits.popcount();
 
     // fast case if *this is top
     if (num_unknown_bits == BW) {
-      constexpr APInt<BW> max = APInt<BW>::getMaxValue();
+      constexpr const APInt<BW> max = APInt<BW>::getMaxValue();
       res.reserve(max.getZExtValue());
 
       for (APInt<BW> i = APInt<BW>::getZero();; ++i) {
@@ -114,22 +116,22 @@ public:
     return (1ULL << distance(KnownBits::bottom())) - 1;
   }
 
-  static constexpr KnownBits fromConcrete(const APInt<BW> &x) noexcept {
+  static constexpr const KnownBits fromConcrete(const APInt<BW> &x) noexcept {
     return KnownBits({~x, x});
   }
 
-  APInt<BW> sample_concrete(std::mt19937 &rng) const {
+  const APInt<BW> sample_concrete(std::mt19937 &rng) const {
     std::uniform_int_distribution<unsigned long> dist(
         0, APInt<BW>::getAllOnes().getZExtValue());
 
-    APInt<BW> val = APInt<BW>(dist(rng));
+    APInt val = APInt<BW>(dist(rng));
     val &= ~zero();
     val |= one();
 
     return val;
   }
 
-  static KnownBits rand(std::mt19937 &rng, std::uint64_t level) noexcept {
+  static const KnownBits rand(std::mt19937 &rng, std::uint64_t level) noexcept {
     assert(level <= BW);
 
     auto rand_bounded = [&rng](std::uint32_t bound) -> std::uint32_t {
@@ -176,18 +178,18 @@ public:
     return KnownBits({zeros, ones});
   }
 
-  static constexpr KnownBits bottom() noexcept {
-    constexpr APInt<BW> max = APInt<BW>::getMaxValue();
+  static constexpr const KnownBits bottom() noexcept {
+    constexpr const APInt<BW> max = APInt<BW>::getMaxValue();
     return KnownBits{{max, max}};
   }
 
-  static constexpr KnownBits top() noexcept {
-    constexpr APInt<BW> min = APInt<BW>::getZero();
+  static constexpr const KnownBits top() noexcept {
+    constexpr const APInt<BW> min = APInt<BW>::getZero();
     return KnownBits{{min, min}};
   }
 
-  static constexpr std::vector<KnownBits> enumLattice() {
-    constexpr std::uint64_t max =
+  static constexpr std::vector<KnownBits> const enumLattice() noexcept {
+    constexpr const std::uint64_t max =
         static_cast<std::uint64_t>(APInt<BW>::getMaxValue().getZExtValue());
     APInt<BW> zero = APInt<BW>(0);
     APInt<BW> one = APInt<BW>(0);
@@ -215,17 +217,15 @@ public:
   std::array<BV, arity> v{};
 
 private:
-  [[nodiscard]] constexpr const APInt<BW> &zero() const noexcept {
-    return v[0];
-  }
-  [[nodiscard]] constexpr const APInt<BW> &one() const noexcept { return v[1]; }
+  [[nodiscard]] constexpr const APInt<BW> zero() const noexcept { return v[0]; }
+  [[nodiscard]] constexpr const APInt<BW> one() const noexcept { return v[1]; }
 
   [[nodiscard]] constexpr bool isConstant() const noexcept {
     return zero().popcount() + one().popcount() == BW;
   }
 
   [[nodiscard]] constexpr const APInt<BW> getConstant() const noexcept {
-    assert(this->isConstant() && "Can't get constant if val is not const");
+    assert(this.isConstant() && "Can't get constant if val is not const");
     return one();
   }
 };

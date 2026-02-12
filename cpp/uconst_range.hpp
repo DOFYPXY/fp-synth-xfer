@@ -11,6 +11,8 @@
 #include "apint.hpp"
 #include "domain.hpp"
 
+using namespace DomainHelpers;
+
 template <std::size_t BW> class UConstRange {
 public:
   using BV = APInt<BW>;
@@ -43,28 +45,28 @@ public:
   }
   bool constexpr isBottom() const noexcept { return lower().ugt(upper()); }
 
-  constexpr UConstRange meet(const UConstRange &rhs) const noexcept {
-    const BV l = rhs.lower().ugt(lower()) ? rhs.lower() : lower();
-    const BV u = rhs.upper().ult(upper()) ? rhs.upper() : upper();
+  const constexpr UConstRange meet(const UConstRange &rhs) const noexcept {
+    const APInt l = rhs.lower().ugt(lower()) ? rhs.lower() : lower();
+    const APInt u = rhs.upper().ult(upper()) ? rhs.upper() : upper();
     if (l.ugt(u))
       return bottom();
-    return UConstRange({l, u});
+    return UConstRange({std::move(l), std::move(u)});
   }
 
-  constexpr UConstRange join(const UConstRange &rhs) const noexcept {
-    const BV l = rhs.lower().ult(lower()) ? rhs.lower() : lower();
-    const BV u = rhs.upper().ugt(upper()) ? rhs.upper() : upper();
-    return UConstRange({l, u});
+  const constexpr UConstRange join(const UConstRange &rhs) const noexcept {
+    const APInt l = rhs.lower().ult(lower()) ? rhs.lower() : lower();
+    const APInt u = rhs.upper().ugt(upper()) ? rhs.upper() : upper();
+    return UConstRange({std::move(l), std::move(u)});
   }
 
-  std::vector<APInt<BW>> toConcrete() const {
+  const constexpr std::vector<APInt<BW>> toConcrete() const noexcept {
     if (lower().ugt(upper()))
       return {};
 
     std::vector<APInt<BW>> res;
     res.reserve(APIntOps::abdu(lower(), upper()).getZExtValue() + 1);
 
-    for (APInt<BW> x = lower(); x.ule(upper()); x += 1) {
+    for (APInt x = lower(); x.ule(upper()); x += 1) {
       res.push_back(x);
 
       if (x == APInt<BW>::getMaxValue())
@@ -84,10 +86,8 @@ public:
     if (rhs.isBottom())
       return APIntOps::abdu(lower(), upper()).getZExtValue();
 
-    const std::uint64_t ld =
-        APIntOps::abdu(lower(), rhs.lower()).getZExtValue();
-    const std::uint64_t ud =
-        APIntOps::abdu(upper(), rhs.upper()).getZExtValue();
+    const uint64_t ld = APIntOps::abdu(lower(), rhs.lower()).getZExtValue();
+    const uint64_t ud = APIntOps::abdu(upper(), rhs.upper()).getZExtValue();
     return ld + ud;
   }
 
@@ -95,47 +95,45 @@ public:
     return distance(UConstRange::bottom());
   }
 
-  static constexpr UConstRange fromConcrete(const APInt<BW> &x) noexcept {
+  static constexpr const UConstRange fromConcrete(const APInt<BW> &x) noexcept {
     return UConstRange({x, x});
   }
 
-  APInt<BW> sample_concrete(std::mt19937 &rng) const {
-    std::uniform_int_distribution<std::uint64_t> dist(lower().getZExtValue(),
+  const APInt<BW> sample_concrete(std::mt19937 &rng) const {
+    std::uniform_int_distribution<unsigned long> dist(lower().getZExtValue(),
                                                       upper().getZExtValue());
     return APInt<BW>(dist(rng));
   }
 
-  static UConstRange rand(std::mt19937 &rng, std::uint64_t level) noexcept {
-    const std::uint64_t allOnes = APInt<BW>::getAllOnes().getZExtValue();
-    assert(level <= allOnes);
-
-    std::uint64_t ub = allOnes - level;
-    std::uniform_int_distribution<std::uint64_t> dist(0, ub);
+  static const UConstRange rand(std::mt19937 &rng,
+                                std::uint64_t level) noexcept {
+    std::uint64_t ub = APInt<BW>::getAllOnes().getZExtValue() - level;
+    std::uniform_int_distribution<unsigned long> dist(0, ub);
     std::uint64_t low = dist(rng);
 
     return UConstRange({APInt<BW>(low), APInt<BW>(low + level)});
   }
 
-  static constexpr UConstRange bottom() noexcept {
-    constexpr APInt<BW> min = APInt<BW>::getMinValue();
-    constexpr APInt<BW> max = APInt<BW>::getMaxValue();
+  static constexpr const UConstRange bottom() noexcept {
+    constexpr APInt min = APInt<BW>::getMinValue();
+    constexpr APInt max = APInt<BW>::getMaxValue();
     return UConstRange({max, min});
   }
 
-  static constexpr UConstRange top() noexcept {
-    constexpr APInt<BW> min = APInt<BW>::getMinValue();
-    constexpr APInt<BW> max = APInt<BW>::getMaxValue();
+  static constexpr const UConstRange top() noexcept {
+    constexpr APInt min = APInt<BW>::getMinValue();
+    constexpr APInt max = APInt<BW>::getMaxValue();
     return UConstRange({min, max});
   }
 
   // TODO put a reserve call for the vector
-  static std::vector<UConstRange> enumLattice() {
+  static constexpr std::vector<UConstRange> const enumLattice() noexcept {
     const unsigned int min =
         static_cast<unsigned int>(APInt<BW>::getMinValue().getZExtValue());
     const unsigned int max =
         static_cast<unsigned int>(APInt<BW>::getMaxValue().getZExtValue());
-    BV l = BV(0);
-    BV u = BV(0);
+    APInt l = APInt<BW>(0);
+    APInt u = APInt<BW>(0);
     std::vector<UConstRange> ret = {};
 
     for (unsigned int i = min; i <= max; ++i) {
@@ -157,10 +155,10 @@ public:
   std::array<BV, arity> v{};
 
 private:
-  [[nodiscard]] constexpr const APInt<BW> &lower() const noexcept {
+  [[nodiscard]] constexpr const APInt<BW> lower() const noexcept {
     return v[0];
   }
-  [[nodiscard]] constexpr const APInt<BW> &upper() const noexcept {
+  [[nodiscard]] constexpr const APInt<BW> upper() const noexcept {
     return v[1];
   }
 };

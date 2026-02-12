@@ -47,14 +47,12 @@ class Jit:
     def run_passes(self, mod: llvm.ModuleRef):
         pb = llvm.PassBuilder(self.tm, llvm.PipelineTuningOptions())
         mpm = pb.getModulePassManager()
-        mpm.add_instruction_combine_pass()
+        mpm.add_aggressive_dce_pass()
+        mpm.add_aa_eval_pass()
+        mpm.add_aggressive_instcombine_pass()
         mpm.add_simplify_cfg_pass()
-        # TODO Add these back if we're able to upgrade llvmlite versions
-        # mpm.add_aggressive_dce_pass()
-        # mpm.add_aa_eval_pass()
-        # mpm.add_aggressive_instcombine_pass()
-        # mpm.add_constant_merge_pass()
-        # mpm.add_rpo_function_attrs_pass()
+        mpm.add_constant_merge_pass()
+        mpm.add_rpo_function_attrs_pass()
 
         mpm.run(mod, pb)
 

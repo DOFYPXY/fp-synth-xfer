@@ -154,6 +154,8 @@ def eval_transfer_func(
 ) -> list[EvalResult]:
     def get_eval_f(x: "ToEval") -> Callable[["ToEval", list[int], list[int]], "Results"]:
         suffix = x.__class__.__name__.lower()[6:]
+        i = next(k for k, c in enumerate(suffix) if c.isdigit())
+        suffix = suffix[:i] + "_" + suffix[i:]
         func_name = f"eval_{suffix}"
 
         try:
@@ -164,7 +166,7 @@ def eval_transfer_func(
             raise TypeError(
                 f"{func_name} exists but is not callable (got {type(eval_fn).__name__})"
             )
-        return eval_fn
+        return eval_fn  # type: ignore
 
     per_bits = [
         get_per_bit(get_eval_f(to_eval)(to_eval, xs, bs))

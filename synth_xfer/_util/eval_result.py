@@ -175,7 +175,4 @@ class EvalResult:
         return self.sounds == self.all_cases
 
     def get_potential_improve(self):
-        try:
-            return (self.base_dist - self.sound_dist) / (self.base_dist)
-        except ZeroDivisionError:
-            return 0
+        return (self.base_dist - self.sound_dist) / (self.base_dist)
