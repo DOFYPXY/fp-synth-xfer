@@ -26,7 +26,9 @@ from synth_xfer._util.random import Random, Sampler
 from synth_xfer.cli.args import get_sampler, make_sampler_parser
 
 
-def _int_tuple(s: str) -> tuple[int, ...]:
+def _int_tuple(s: str) -> tuple[int, ...] | None:
+    if s.lower() == "none":
+        return None
     try:
         items = s.split(",")
         if len(items) == 1:
@@ -38,7 +40,9 @@ def _int_tuple(s: str) -> tuple[int, ...]:
         else:
             raise ValueError
     except Exception:
-        raise ArgumentTypeError(f"Invalid tuple format: '{s}'. Expected format: int,int")
+        raise ArgumentTypeError(
+            f"Invalid tuple format: '{s}'. Expected format: int,int or 'none'"
+        )
 
 
 def _reg_args():
@@ -49,8 +53,18 @@ def _reg_args():
         help="directory of solutions (with config.log) or a single transformer file",
     )
     p.add_argument("--random-seed", type=int, help="seed for synthesis")
-    p.add_argument("--exact-bw", type=_int_tuple, default=(8, 10000))
-    p.add_argument("--norm-bw", type=_int_tuple, default=(64, 2500, 50000))
+    p.add_argument(
+        "--exact-bw",
+        type=_int_tuple,
+        default=(8, 10000),
+        help="Exact bitwidths (or 'none' to skip)",
+    )
+    p.add_argument(
+        "--norm-bw",
+        type=_int_tuple,
+        default=(64, 2500, 50000),
+        help="Normalized bitwidths (or 'none' to skip)",
+    )
     make_sampler_parser(p)
     p.add_argument("-o", "--output", type=Path, default=None)
     p.add_argument(
@@ -190,26 +204,28 @@ def _run_job(job: EvalJob) -> tuple[EvalResult, EvalResult]:
 
 
 def _parse_bw_args(
-    exact_bw: tuple[int, ...],
-    norm_bw: tuple[int, ...],
+    exact_bw: tuple[int, ...] | None,
+    norm_bw: tuple[int, ...] | None,
 ) -> tuple[list[int], list[tuple[int, int]], list[tuple[int, int, int]]]:
     lbw: list[int] = []
     mbw: list[tuple[int, int]] = []
     hbw: list[tuple[int, int, int]] = []
 
-    if len(exact_bw) == 1:
-        lbw.append(exact_bw[0])
-    elif len(exact_bw) == 2:
-        mbw.append(exact_bw)
-    elif len(exact_bw) == 3:
-        raise ValueError("Can't use hbw approx. for exact calculation")
+    if exact_bw is not None:
+        if len(exact_bw) == 1:
+            lbw.append(exact_bw[0])
+        elif len(exact_bw) == 2:
+            mbw.append(exact_bw)
+        elif len(exact_bw) == 3:
+            raise ValueError("Can't use hbw approx. for exact calculation")
 
-    if len(norm_bw) == 1:
-        lbw.append(norm_bw[0])
-    elif len(norm_bw) == 2:
-        mbw.append(norm_bw)
-    elif len(norm_bw) == 3:
-        hbw.append(norm_bw)
+    if norm_bw is not None:
+        if len(norm_bw) == 1:
+            lbw.append(norm_bw[0])
+        elif len(norm_bw) == 2:
+            mbw.append(norm_bw)
+        elif len(norm_bw) == 3:
+            hbw.append(norm_bw)
 
     return lbw, mbw, hbw
 
@@ -300,26 +316,29 @@ def main() -> None:
         with Pool() as p:
             data = p.map(_run_job, jobs)
 
-    exact_bw = args.exact_bw[0]
-    norm_bw = args.norm_bw[0]
+    exact_bw = args.exact_bw[0] if args.exact_bw is not None else None
+    norm_bw = args.norm_bw[0] if args.norm_bw is not None else None
 
     rows = []
     for job, (top_r, synth_r) in zip(jobs, data):
-        top_8 = next(x for x in top_r.per_bit_res if x.bitwidth == exact_bw)
-        synth_8 = next(x for x in synth_r.per_bit_res if x.bitwidth == exact_bw)
-        top_64 = next(x for x in top_r.per_bit_res if x.bitwidth == norm_bw)
-        synth_64 = next(x for x in synth_r.per_bit_res if x.bitwidth == norm_bw)
+        row = {
+            "Domain": str(job.domain),
+            "Op": job.op_path.stem,
+        }
 
-        rows.append(
-            {
-                "Domain": str(job.domain),
-                "Op": job.op_path.stem,
-                "Top Exact %": top_8.get_exact_prop() * 100.0,
-                "Synth Exact %": synth_8.get_exact_prop() * 100.0,
-                "Top Norm": top_64.dist,
-                "Synth Norm": synth_64.dist,
-            }
-        )
+        if exact_bw is not None:
+            top_8 = next(x for x in top_r.per_bit_res if x.bitwidth == exact_bw)
+            synth_8 = next(x for x in synth_r.per_bit_res if x.bitwidth == exact_bw)
+            row["Top Exact %"] = top_8.get_exact_prop() * 100.0
+            row["Synth Exact %"] = synth_8.get_exact_prop() * 100.0
+
+        if norm_bw is not None:
+            top_64 = next(x for x in top_r.per_bit_res if x.bitwidth == norm_bw)
+            synth_64 = next(x for x in synth_r.per_bit_res if x.bitwidth == norm_bw)
+            row["Top Norm"] = top_64.dist
+            row["Synth Norm"] = synth_64.dist
+
+        rows.append(row)
 
     df = pd.DataFrame(rows)
     print(f"Exact bw: {args.exact_bw}")
