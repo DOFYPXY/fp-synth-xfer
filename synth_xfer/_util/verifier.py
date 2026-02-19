@@ -43,6 +43,7 @@ from xdsl_smt.utils.transfer_function_util import (
 )
 from z3 import ModelRef, Solver, parse_smt2_string, sat, unknown
 from .fp_semantics import FloatingPointTypeSemantics, fp_semantics
+from synth_xfer.dialects.fp import FloatType
 
 # TODO do we still need this
 _TMP_MODULE: list[ModuleOp] = []
