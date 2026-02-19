@@ -16,7 +16,20 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 
+# Prefer building against the active Python's development headers when available.
+# In some minimal environments (e.g. CI containers) these may not be installed;
+# we don't hard-fail at configure time so users can install the headers and retry.
+find_package(Python COMPONENTS Interpreter Development.Module)
 find_package(pybind11 CONFIG REQUIRED)
+
+if(NOT Python_Development.Module_FOUND)
+  message(FATAL_ERROR
+    "Python development headers were not found.\n"
+    "On Debian/Ubuntu: sudo apt-get install python3-dev\n"
+    "On Arch: sudo pacman -S python\n"
+    "On Fedora: sudo dnf install python3-devel\n"
+    "Then re-run: pip install -e '.[dev]'\n")
+endif()
 
 set(SYNTH_XFER_SOURCES
   cpp/apint.hpp
@@ -32,6 +45,9 @@ set(SYNTH_XFER_SOURCES
 
 pybind11_add_module(_eval_engine ${SYNTH_XFER_SOURCES})
 target_link_libraries(_eval_engine PRIVATE pybind11::headers)
+if(Python_Development.Module_FOUND)
+  target_link_libraries(_eval_engine PRIVATE Python::Module)
+endif()
 target_compile_features(_eval_engine PRIVATE cxx_std_20)
 set_target_properties(_eval_engine PROPERTIES CXX_EXTENSIONS OFF)
 
