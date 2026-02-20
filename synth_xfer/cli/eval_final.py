@@ -329,14 +329,14 @@ def main() -> None:
         if exact_bw is not None:
             top_8 = next(x for x in top_r.per_bit_res if x.bitwidth == exact_bw)
             synth_8 = next(x for x in synth_r.per_bit_res if x.bitwidth == exact_bw)
-            row["Top Exact %"] = str(top_8.get_exact_prop() * 100.0)
-            row["Synth Exact %"] = str(synth_8.get_exact_prop() * 100.0)
+            row["Top Exact %"] = f"{top_8.get_exact_prop() * 100.0:.2f}"
+            row["Synth Exact %"] = f"{synth_8.get_exact_prop() * 100.0:.2f}"
 
         if norm_bw is not None:
             top_64 = next(x for x in top_r.per_bit_res if x.bitwidth == norm_bw)
             synth_64 = next(x for x in synth_r.per_bit_res if x.bitwidth == norm_bw)
-            row["Top Norm"] = str(top_64.dist)
-            row["Synth Norm"] = str(synth_64.dist)
+            row["Top Norm"] = f"{top_64.dist:.2f}"
+            row["Synth Norm"] = f"{synth_64.dist:.2f}"
 
         rows.append(row)
 
