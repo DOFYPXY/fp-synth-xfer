@@ -32,8 +32,19 @@ from synth_xfer._util.synth_context import (
     is_int_op,
     not_in_main_body,
 )
+from synth_xfer._util.domain import AbstractDomain
+from dataclasses import dataclass
 
-
+# We add this dataclass to test mutations in isolations
+# TODO: Remove this after testing 
+@dataclass
+class MutationFlags:
+    replace_entire_op: bool = True # Exists 
+    replace_operand: bool = True # Exists
+    rewire_make_op: bool = False # New
+    perturb_constant: bool = False # New
+    replace_op_window: bool = False # New
+    
 class MCMCSampler:
     current: MutationProgram
     current_cmp: EvalResult
@@ -44,6 +55,7 @@ class MCMCSampler:
     total_steps: int
     is_cond: bool
     length: int
+    flags: MutationFlags
 
     def __init__(
         self,
@@ -55,8 +67,10 @@ class MCMCSampler:
         reset_init_program: bool = True,
         random_init_program: bool = True,
         is_cond: bool = False,
+        flags: MutationFlags | None = None,
     ):
         self.is_cond = is_cond
+        self.flags = flags or MutationFlags() 
         if is_cond:
             cond_type = FunctionType.from_lists(
                 func.function_type.inputs,  # pyright: ignore [reportArgumentType]
@@ -120,7 +134,80 @@ class MCMCSampler:
         success = False
         while not success:
             success = self.context.replace_operand(new_op, ith, vals)
+            
+    def rewire_make_op(self, history: bool):
+        ops = self.current.ops
+        make_op_idx = len(ops) - 2
+        make_op = ops[make_op_idx]
+        assert isinstance(make_op, MakeOp)
 
+        # Pick a random operand of MakeOp to rewire
+        ith = self.context.random.randint(0, len(make_op.operands) - 1)
+
+        # Clone so we can track history
+        new_make_op = make_op.clone()
+        self.current.subst_operation(make_op, new_make_op, history)
+
+        # Get valid int operands before MakeOp
+        vals = self.current.get_valid_operands(make_op_idx, INT_T)
+        if not vals:
+            # Nothing to rewire, revert silently
+            self.current.subst_operation(new_make_op, new_make_op.clone(), False)
+            return
+
+        success = False
+        while not success:
+            success = self.context.replace_operand(new_make_op, ith, vals)
+
+    def perturb_constant(self, history: bool):
+        ops = self.current.ops
+        const_ops = [
+            (op, idx) for idx, op in enumerate(ops)
+            if isinstance(op, Constant)
+        ]
+        if not const_ops:
+            return
+
+        old_const, idx = self.random.choice(const_ops)
+        ref_val = old_const.op
+        new_val = self._sample_perturbed_constant(old_const.value.value.data)
+        new_const = Constant(ref_val, new_val)
+        self.current.subst_operation(old_const, new_const, history)
+
+    def _sample_perturbed_constant(self, current_val: int) -> int:
+        domain = self.context.domain
+        if domain == AbstractDomain.FPRange:
+            candidates = self._fp_constant_candidates()
+        elif domain == AbstractDomain.KnownBits:
+            candidates = self._kb_constant_candidates()
+        else:
+            candidates = self._cr_constant_candidates()
+
+        filtered = [c for c in candidates if c != current_val]
+        if not filtered:
+            filtered = candidates  # fallback if all candidates match current
+        return self.random.choice(filtered)
+
+    def _kb_constant_candidates(self) -> list[int]:
+        return [0, 1]
+
+    def _cr_constant_candidates(self) -> list[int]:
+        return [0, 1, 2, 4, 8, 16, 32, 64, 128]
+
+    def _fp_constant_candidates(self) -> list[int]:
+        return [
+            0,              # 0.0
+            0x80000000,     # -0.0
+            0x3F800000,     # 1.0
+            0xBF800000,     # -1.0
+            0x7F800000,     # +inf
+            0xFF800000,     # -inf
+            0x7F7FFFFF,     # MAX_FLOAT
+            0xFF7FFFFF,     # -MAX_FLOAT
+            0x00800000,     # MIN_FLOAT (smallest normal)
+            0x7FC00000,     # NaN
+        ]
+            
     def construct_init_program(self, _func: FuncOp, length: int):
         func = _func.clone()
         block = func.body.block
@@ -211,27 +298,36 @@ class MCMCSampler:
         return MutationProgram(func)
 
     def sample_next(self):
-        """
-        Sample the next program.
-        Return the new program with the proposal ratio.
-        """
-
         live_ops = self.current.get_modifiable_operations()
         live_op_indices = [x[1] for x in live_ops]
 
-        sample_mode = self.random.random()
+        choices = []
+        if self.flags.replace_entire_op and live_op_indices:
+            choices.append(('replace_entire', 3))
+        if self.flags.replace_operand and live_op_indices:
+            choices.append(('replace_operand', 7))
+        if self.flags.rewire_make_op:
+            choices.append(('rewire_make', 1))
+        if self.flags.perturb_constant:
+            choices.append(('perturb_const', 1))
+        if not choices:
+            return self
 
-        # replace an operation with a new operation
-        if sample_mode < 0.3 and live_op_indices:
-            idx = self.random.choice(live_op_indices)
-            self.replace_entire_operation(idx, True)
-        # replace an operand in an operation
-        elif sample_mode < 1 and live_op_indices:
-            idx = self.random.choice(live_op_indices)
-            self.replace_operand(idx, True)
-        # elif sample_mode < 1:
-        #     # replace an operand in makeOp
-        #     ratio = self.replace_make_operand(ops, len(ops) - 2)
+        names = [c[0] for c in choices]
+        weights = [c[1] for c in choices]
+        mutation = self.random.choice_weighted(names, dict(zip(names, weights)))
+
+        if mutation == 'replace_entire':
+            self.replace_entire_operation(self.random.choice(live_op_indices), True)
+        elif mutation == 'replace_operand':
+            self.replace_operand(self.random.choice(live_op_indices), True)
+        elif mutation == 'rewire_make':
+            self.rewire_make_op(True)
+        elif mutation == 'perturb_const':
+            self.perturb_constant(True)
+        elif mutation == 'window':
+            self.replace_op_window(True)
+
         return self
 
     def reset_to_random_prog(self):
