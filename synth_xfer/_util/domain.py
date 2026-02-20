@@ -5,6 +5,7 @@ class AbstractDomain(Enum):
     KnownBits = "KnownBits", 2
     UConstRange = "UConstRange", 2
     SConstRange = "SConstRange", 2
+    FPRange = "FPRange", 2
 
     vec_size: int
 
