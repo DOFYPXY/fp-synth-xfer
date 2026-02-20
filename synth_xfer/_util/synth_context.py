@@ -52,6 +52,7 @@ from synth_xfer._util.dsl_operators import (
     make_uniform_weights,
 )
 from synth_xfer._util.random import Random
+from synth_xfer._util.domain import AbstractDomain
 
 T = TypeVar("T")
 
@@ -274,6 +275,7 @@ def not_in_main_body(op: Operation):
 
 class SynthesizerContext:
     random: Random
+    domain: AbstractDomain | None 
     cmp_flags: list[int]
     dsl_ops: dict[str, Collection[type[Operation]]]
     op_weights: dict[str, dict[type[Operation], int]]
@@ -287,8 +289,10 @@ class SynthesizerContext:
         random: Random,
         dsl_ops: DslOpSet | None = None,
         weighted: bool = False,
+        domain: AbstractDomain | None = None, 
     ):
         self.random = random
+        self.domain = domain
         self.cmp_flags = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
         self.dsl_ops = dict()
         self.op_weights = dict()
