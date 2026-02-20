@@ -56,7 +56,12 @@ these executables depend on paths in the repo the should be run from the project
 Here's a simple invocation of the `sxf` program for quick testing (should take ~60s):
 
 ```bash
-sxf mlir/Operations/And.mlir -o outputs/And -domain KnownBits -num-iters 2 -num-steps 100 -num-mcmc 50 -random-seed 2333
+sxf mlir/Operations/And.mlir  \
+    --domain KnownBits        \
+    --num-iters 2             \
+    --num-steps 100           \
+    --num-mcmc 50             \
+    --random-seed 2333
 ```
 
 Output:
@@ -69,14 +74,21 @@ Final Soln   | Exact 96.7078% | 3 solutions |
 
 (The final output may be different depending on your system's RNG differences).
 
-The command reads the MLIR program `mlir/Operations/And.mlir` and writes outputs into `outputs/And`.
+The command reads the MLIR program `mlir/Operations/And.mlir` and writes addtional output infor into `outputs/KnownBits_And/`.
 
 ### Full experiment setup
 
-This is a more comprehensive invocation closer to the experiment setup used in the paper:
+This is a more comprehensive invocation closer to the experiment setup used in the paper (this can take up to an hour depending on your machine):
 
 ```bash
-sxf mlir/Operations/Add.mlir -o outputs/Add -domain KnownBits -num-iters 5 -num-steps 1000 -num-mcmc 100 -mbw 8,5000 16,5000 -hbw 32,5000,10000 64,5000,10000 -vbw 4,8,16,32,64
+sxf mlir/Operations/Add.mlir          \
+    --domain KnownBits                \
+    --num-iters 5                     \
+    --num-steps 1000                  \
+    --num-mcmc 100                    \
+    --mbw 8,5000 16,5000              \
+    --hbw 32,5000,10000 64,5000,10000 \
+    --vbw 4,8,16,32,64
 ```
 
 ## Important CLI Options for `sxf`
