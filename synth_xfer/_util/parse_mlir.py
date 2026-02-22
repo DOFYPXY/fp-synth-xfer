@@ -12,12 +12,14 @@ from xdsl_smt.dialects.transfer import AbstractValueType, Transfer, TransInteger
 from xdsl_smt.passes.transfer_inline import FunctionCallInline
 
 from synth_xfer._util.domain import AbstractDomain
+from synth_xfer.dialects.fp import FP
 
 _ctx = Context()
 _ctx.load_dialect(Arith)
 _ctx.load_dialect(Builtin)
 _ctx.load_dialect(Func)
 _ctx.load_dialect(Transfer)
+_ctx.load_dialect(FP)
 
 
 @runtime_checkable
