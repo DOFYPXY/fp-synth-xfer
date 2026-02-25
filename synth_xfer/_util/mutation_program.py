@@ -19,11 +19,15 @@ class MutationProgram:
     func: FuncOp
     old_op: None | Operation
     new_op: None | Operation
+    old_ops: None | list[Operation]
+    new_ops: None | list[Operation]
 
     def __init__(self, func: FuncOp):
         self.func = func
         self.old_op = None
         self.new_op = None
+        self.old_ops = None
+        self.new_ops = None        
 
     @property
     def ops(self):
@@ -98,3 +102,28 @@ class MutationProgram:
         Get operations that return a value of type ty and are before ops[x], which can serve as operands
         """
         return [op.results[0] for op in self.ops[:x] if is_of_type(op, ty)]
+
+    def remove_history_window(self):
+        assert self.old_ops is not None
+        assert self.new_ops is not None
+        for op in self.old_ops:
+            op.erase()
+        self.old_ops = None
+        self.new_ops = None
+
+    def revert_window(self):
+        assert self.old_ops is not None
+        assert self.new_ops is not None
+        # Insert old ops back before first new op
+        block = self.func.body.block
+        first_new = self.new_ops[0]
+        for old_op in self.old_ops:
+            block.insert_op_before(old_op, first_new)
+        # Rewire uses back to old results
+        for old_op, new_op in zip(self.old_ops, self.new_ops):
+            if len(old_op.results) > 0 and len(new_op.results) > 0:
+                new_op.results[0].replace_by(old_op.results[0])
+        for new_op in self.new_ops:
+            block.detach_op(new_op)
+        self.new_ops = None
+        self.old_ops = None

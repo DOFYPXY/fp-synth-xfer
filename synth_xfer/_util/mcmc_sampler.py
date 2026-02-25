@@ -98,12 +98,18 @@ class MCMCSampler:
         return self.current.func
 
     def accept_proposed(self, proposed_cmp: EvalResult):
-        self.current.remove_history()
+        if self.current.old_ops is not None:
+            self.current.remove_history_window()
+        else:
+            self.current.remove_history()
         self.current_cmp = proposed_cmp
         self.step_cnt += 1
 
     def reject_proposed(self):
-        self.current.revert_operation()
+        if self.current.old_ops is not None:
+            self.current.revert_window()
+        else:
+            self.current.revert_operation()
         self.step_cnt += 1
 
     def replace_entire_operation(self, idx: int, history: bool):
@@ -207,6 +213,47 @@ class MCMCSampler:
             0x00800000,     # MIN_FLOAT (smallest normal)
             0x7FC00000,     # NaN
         ]
+        
+    def replace_op_window(self, history: bool):
+        live_ops = self.current.get_modifiable_operations()
+        if len(live_ops) < 2:
+            return
+
+        # Pick window size 2 or 3
+        window_size = min(
+            self.random.randint(2, 3),
+            len(live_ops)
+        )
+
+        # Pick a random starting position in live ops
+        start = self.random.randint(0, len(live_ops) - window_size)
+        window = live_ops[start: start + window_size]
+
+        old_ops = [op for op, _ in window]
+        new_ops = []
+
+        block = self.current.func.body.block
+
+        for op, idx in window:
+            valid_operands = {
+                ty: self.current.get_valid_operands(idx, ty)
+                for ty in [INT_T, BOOL_T]
+            }
+            new_op = None
+            while new_op is None:
+                new_op = self.context.get_random_op(
+                    get_ret_type(op), valid_operands
+                )
+            new_ops.append(new_op)
+            # Insert new op and rewire before moving to next
+            block.insert_op_before(new_op, op)
+            if len(op.results) > 0 and len(new_op.results) > 0:
+                op.results[0].replace_by(new_op.results[0])
+            block.detach_op(op)
+
+        if history:
+            self.current.old_ops = old_ops
+            self.current.new_ops = new_ops
             
     def construct_init_program(self, _func: FuncOp, length: int):
         func = _func.clone()
@@ -310,6 +357,8 @@ class MCMCSampler:
             choices.append(('rewire_make', 1))
         if self.flags.perturb_constant:
             choices.append(('perturb_const', 1))
+        if self.flags.replace_op_window and len(live_op_indices) >= 2:
+            choices.append(('window', 1))
         if not choices:
             return self
 
