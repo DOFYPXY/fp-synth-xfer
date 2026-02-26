@@ -13,7 +13,9 @@ from xdsl.dialects.builtin import FloatAttr
 
 import xdsl_smt.dialects.smt_bitvector_dialect as smt_bv
 import xdsl_smt.dialects.smt_floatingpoint_dialect as smt_fp
+from xdsl.dialects.smt import BoolType
 from xdsl_smt.dialects.smt_floatingpoint_dialect import FloatingPointType
+from xdsl_smt.dialects.smt_utils_dialect import PairType
 from xdsl_smt.semantics.semantics import (
     OperationSemantics,
     TypeSemantics,
@@ -124,6 +126,15 @@ class FloatingPointTypeSemantics(TypeSemantics):
     def get_semantics(self, type: Attribute) -> Attribute:
         assert isinstance(type, FloatType)
         return FloatingPointType(_FP16_EB, _FP16_SB)
+
+
+class FloatingPointAbsTypeSemantics(TypeSemantics):
+    """Convert an FPAbsValueType to its SMT representation."""
+
+    def get_semantics(self, type: Attribute) -> Attribute:
+        assert isinstance(type, FPAbsValueType)
+        fp_sort = FloatingPointType(_FP16_EB, _FP16_SB)
+        return PairType(fp_sort, PairType(fp_sort, BoolType()))
 
 
 fp_semantics: dict[type[Operation], OperationSemantics] = {
