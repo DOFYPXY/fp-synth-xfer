@@ -13,9 +13,9 @@ from xdsl.dialects.builtin import FloatAttr
 
 import xdsl_smt.dialects.smt_bitvector_dialect as smt_bv
 import xdsl_smt.dialects.smt_floatingpoint_dialect as smt_fp
-from xdsl.dialects.smt import BoolType
+from xdsl.dialects.smt import BitVectorType, BoolType
 from xdsl_smt.dialects.smt_floatingpoint_dialect import FloatingPointType
-from xdsl_smt.dialects.smt_utils_dialect import PairType
+from xdsl_smt.dialects.smt_utils_dialect import FirstOp, PairOp, PairType, SecondOp
 from xdsl_smt.semantics.semantics import (
     OperationSemantics,
     TypeSemantics,
@@ -134,7 +134,67 @@ class FloatingPointAbsTypeSemantics(TypeSemantics):
     def get_semantics(self, type: Attribute) -> Attribute:
         assert isinstance(type, FPAbsValueType)
         fp_sort = FloatingPointType(_FP16_EB, _FP16_SB)
-        return PairType(fp_sort, PairType(fp_sort, BoolType()))
+        # has_nan is i1, which arith ops expect as PairType(BV1, Bool)
+        i1_lowered = PairType(BitVectorType(1), BoolType())
+        return PairType(fp_sort, PairType(fp_sort, i1_lowered))
+
+
+class FPGetOpSemantics(OperationSemantics):
+    """Lower ``fp.get`` to pair projections on Pair(lo, Pair(hi, has_nan))."""
+
+    def get_semantics(
+        self,
+        operands: Sequence[SSAValue],
+        results: Sequence[Attribute],
+        attributes: Mapping[str, Attribute | SSAValue],
+        effect_state: SSAValue | None,
+        rewriter: PatternRewriter,
+    ) -> tuple[Sequence[SSAValue], SSAValue | None]:
+        from xdsl.dialects.builtin import IntegerAttr
+
+        index = attributes["index"]
+        assert isinstance(index, IntegerAttr)
+        idx = index.value.data
+        arg = operands[0]
+        ops: list[Operation] = []
+        if idx == 0:
+            ops.append(FirstOp(arg))
+        elif idx == 1:
+            ops.append(SecondOp(arg))
+            ops.append(FirstOp(ops[-1].results[0]))
+        elif idx == 2:
+            ops.append(SecondOp(arg))
+            ops.append(SecondOp(ops[-1].results[0]))
+        else:
+            raise ValueError(f"FPGetOp index {idx} out of range for FPAbsValueType")
+        rewriter.insert_op_before_matched_op(ops)
+        return ((ops[-1].results[0],), effect_state)
+
+
+class FPIsNanOpSemantics(OperationSemantics):
+    """Lower ``fp.is_nan`` to smt_fp.IsNaNOp, producing PairType(BV1, Bool)."""
+
+    def get_semantics(
+        self,
+        operands: Sequence[SSAValue],
+        results: Sequence[Attribute],
+        attributes: Mapping[str, Attribute | SSAValue],
+        effect_state: SSAValue | None,
+        rewriter: PatternRewriter,
+    ) -> tuple[Sequence[SSAValue], SSAValue | None]:
+        from xdsl.dialects.smt import ConstantBoolOp, IteOp
+
+        is_nan = smt_fp.IsNaNOp(operands[0])
+        bv1_true = smt_bv.ConstantOp(1, 1)
+        bv1_false = smt_bv.ConstantOp(0, 1)
+        ite = IteOp(is_nan.res, bv1_true.res, bv1_false.res)
+
+        no_poison = ConstantBoolOp(False)
+        pair = PairOp(ite.result, no_poison.result)
+        rewriter.insert_op_before_matched_op(
+            [is_nan, bv1_true, bv1_false, ite, no_poison, pair]
+        )
+        return ((pair.results[0],), effect_state)
 
 
 fp_semantics: dict[type[Operation], OperationSemantics] = {
@@ -151,4 +211,7 @@ fp_semantics: dict[type[Operation], OperationSemantics] = {
     FPDivOp: RoundingModeOpSemantics(smt_fp.DivOp),
     # Constant
     FPConstantOp: FPConstantOpSemantics(),
+    # Abs value ops
+    FPGetOp: FPGetOpSemantics(),
+    FPIsNanOp: FPIsNanOpSemantics(),
 }
