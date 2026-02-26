@@ -18,4 +18,5 @@
     %res_lo = "transfer.select"(%sum_lo_nan, %pos_inf, %sum_lo) : (i1, !fp.float, !fp.float) -> !fp.float
     %res_hi = "transfer.select"(%sum_hi_nan, %neg_inf, %sum_hi) : (i1, !fp.float, !fp.float) -> !fp.float
     %result = "fp.make"(%res_lo, %res_hi, %res_has_nan) : (!fp.float, !fp.float, i1) -> !fp.abs_value
+    "func.return"(%result) : (!fp.abs_value) -> ()
   }) {"sym_name" = "fpr_add", "function_type" = (!fp.abs_value, !fp.abs_value) -> !fp.abs_value} : () -> ()
