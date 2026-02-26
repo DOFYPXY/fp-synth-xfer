@@ -214,4 +214,6 @@ fp_semantics: dict[type[Operation], OperationSemantics] = {
     # Abs value ops
     FPGetOp: FPGetOpSemantics(),
     FPIsNanOp: FPIsNanOpSemantics(),
+    FPPosInfOp: OpSemantics(lambda _: smt_fp.PositiveInfinityOp(_FP16_EB, _FP16_SB)),
+    FPNegInfOp: OpSemantics(lambda _: smt_fp.NegativeInfinityOp(_FP16_EB, _FP16_SB)),
 }
