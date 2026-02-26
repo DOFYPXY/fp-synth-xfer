@@ -12,6 +12,7 @@ from synth_xfer._util.parse_mlir import (
     get_helper_funcs,
     parse_mlir_mod,
 )
+from synth_xfer._util.fp_verify import verify_fp_transfer_function
 from synth_xfer._util.verifier import verify_transfer_function
 from synth_xfer.cli.args import int_list
 from synth_xfer.cli.eval_final import resolve_xfer_name
@@ -23,6 +24,7 @@ def verify_function(
     xfer_helpers: list[FuncOp | None],
     helper_funcs: HelperFuncs,
     timeout: int,
+    domain: AbstractDomain = AbstractDomain.KnownBits,
 ) -> tuple[bool | None, ModelRef | None]:
     xfer_helpers += [
         helper_funcs.get_top_func,
@@ -32,6 +34,11 @@ def verify_function(
         helper_funcs.meet_func,
     ]
     helpers = [x for x in xfer_helpers if x is not None]
+
+    if domain == AbstractDomain.FPRange:
+        return verify_fp_transfer_function(
+            func, helper_funcs.crt_func, helpers, bw, timeout
+        )
 
     return verify_transfer_function(func, helper_funcs.crt_func, helpers, bw, timeout)
 
@@ -76,7 +83,7 @@ def main() -> None:
     for bw in args.bw:
         start_time = perf_counter()
         is_sound, model = verify_function(
-            bw, xfer_fn, list(xfer_fns.values()), helper_funcs, args.timeout
+            bw, xfer_fn, list(xfer_fns.values()), helper_funcs, args.timeout, domain
         )
         run_time = perf_counter() - start_time
 
