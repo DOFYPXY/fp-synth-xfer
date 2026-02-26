@@ -150,6 +150,8 @@ class LowerToLLVM:
     @staticmethod
     def is_transfer_fn(mlir_fn: FuncOp) -> bool:
         def is_abst_val(ty: Attribute):
+            if isinstance(ty, FPAbsValueType):
+                return True
             if isinstance(ty, AbstractValueType):
                 all_trans = all(isinstance(x, TransIntegerType) for x in ty.get_fields())
                 all_ints = all(isinstance(x, IntegerType) for x in ty.get_fields())
