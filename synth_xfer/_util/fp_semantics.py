@@ -182,7 +182,8 @@ class FPIsNanOpSemantics(OperationSemantics):
         effect_state: SSAValue | None,
         rewriter: PatternRewriter,
     ) -> tuple[Sequence[SSAValue], SSAValue | None]:
-        from xdsl.dialects.smt import ConstantBoolOp, IteOp
+        from xdsl.dialects.smt import ConstantBoolOp
+        from xdsl_smt.dialects.smt_dialect import IteOp
 
         is_nan = smt_fp.IsNaNOp(operands[0])
         bv1_true = smt_bv.ConstantOp(1, 1)
@@ -190,11 +191,151 @@ class FPIsNanOpSemantics(OperationSemantics):
         ite = IteOp(is_nan.res, bv1_true.res, bv1_false.res)
 
         no_poison = ConstantBoolOp(False)
-        pair = PairOp(ite.result, no_poison.result)
+        pair = PairOp(ite.res, no_poison.result)
         rewriter.insert_op_before_matched_op(
             [is_nan, bv1_true, bv1_false, ite, no_poison, pair]
         )
         return ((pair.results[0],), effect_state)
+
+
+class FPCmpOpSemantics(OperationSemantics):
+    """Lower ``fp.cmp`` to the appropriate SMT FP comparison predicate(s).
+
+    Handles ordered (oeq/one/olt/ole/ogt/oge), unordered (ueq/une/ult/ule/ugt/uge),
+    and constant (false/true) predicates.  The result is ``PairType(BV1, Bool)``
+    to match the ``IntegerType(1)`` lowering.
+    """
+
+    def get_semantics(
+        self,
+        operands: Sequence[SSAValue],
+        results: Sequence[Attribute],
+        attributes: Mapping[str, Attribute | SSAValue],
+        effect_state: SSAValue | None,
+        rewriter: PatternRewriter,
+    ) -> tuple[Sequence[SSAValue], SSAValue | None]:
+        from xdsl.dialects.builtin import StringAttr
+        from xdsl.dialects.smt import ConstantBoolOp, NotOp, OrOp
+        from xdsl_smt.dialects.smt_dialect import IteOp
+
+        pred_attr = attributes["predicate"]
+        assert isinstance(pred_attr, StringAttr)
+        pred = pred_attr.data
+
+        lhs, rhs = operands[0], operands[1]
+        ops: list[Operation] = []
+        bool_val: SSAValue  # the Bool-typed SSA value for the comparison
+
+        if pred == "false":
+            c = ConstantBoolOp(False)
+            ops.append(c)
+            bool_val = c.result
+        elif pred == "true":
+            c = ConstantBoolOp(True)
+            ops.append(c)
+            bool_val = c.result
+        elif pred == "oeq":
+            cmp = smt_fp.EqOp(lhs, rhs)
+            ops.append(cmp)
+            bool_val = cmp.res
+        elif pred == "one":
+            # ordered not-equal: lt(a,b) OR gt(a,b)
+            lt = smt_fp.LtOp(lhs, rhs)
+            gt = smt_fp.GtOp(lhs, rhs)
+            or_op = OrOp(lt.res, gt.res)
+            ops.extend([lt, gt, or_op])
+            bool_val = or_op.result
+        elif pred == "olt":
+            cmp = smt_fp.LtOp(lhs, rhs)
+            ops.append(cmp)
+            bool_val = cmp.res
+        elif pred == "ole":
+            cmp = smt_fp.LeqOp(lhs, rhs)
+            ops.append(cmp)
+            bool_val = cmp.res
+        elif pred == "ogt":
+            cmp = smt_fp.GtOp(lhs, rhs)
+            ops.append(cmp)
+            bool_val = cmp.res
+        elif pred == "oge":
+            cmp = smt_fp.GeqOp(lhs, rhs)
+            ops.append(cmp)
+            bool_val = cmp.res
+        elif pred == "ueq":
+            # unordered or equal = NOT (lt(a,b) OR gt(a,b))
+            lt = smt_fp.LtOp(lhs, rhs)
+            gt = smt_fp.GtOp(lhs, rhs)
+            or_op = OrOp(lt.res, gt.res)
+            neg = NotOp(or_op.result)
+            ops.extend([lt, gt, or_op, neg])
+            bool_val = neg.result
+        elif pred == "une":
+            # unordered or not-equal = NOT fp.eq(a, b)
+            eq = smt_fp.EqOp(lhs, rhs)
+            neg = NotOp(eq.res)
+            ops.extend([eq, neg])
+            bool_val = neg.result
+        elif pred == "ult":
+            # unordered or less-than = NOT fp.geq(a, b)
+            geq = smt_fp.GeqOp(lhs, rhs)
+            neg = NotOp(geq.res)
+            ops.extend([geq, neg])
+            bool_val = neg.result
+        elif pred == "ule":
+            # unordered or less-equal = NOT fp.gt(a, b)
+            gt = smt_fp.GtOp(lhs, rhs)
+            neg = NotOp(gt.res)
+            ops.extend([gt, neg])
+            bool_val = neg.result
+        elif pred == "ugt":
+            # unordered or greater-than = NOT fp.leq(a, b)
+            leq = smt_fp.LeqOp(lhs, rhs)
+            neg = NotOp(leq.res)
+            ops.extend([leq, neg])
+            bool_val = neg.result
+        elif pred == "uge":
+            # unordered or greater-equal = NOT fp.lt(a, b)
+            lt = smt_fp.LtOp(lhs, rhs)
+            neg = NotOp(lt.res)
+            ops.extend([lt, neg])
+            bool_val = neg.result
+        else:
+            raise ValueError(f"Unsupported fp.cmp predicate: {pred}")
+
+        # Convert Bool → BV1 via IteOp, then wrap with no-poison
+        bv1_true = smt_bv.ConstantOp(1, 1)
+        bv1_false = smt_bv.ConstantOp(0, 1)
+        ite = IteOp(bool_val, bv1_true.res, bv1_false.res)
+        no_poison = ConstantBoolOp(False)
+        pair = PairOp(ite.res, no_poison.result)
+        ops.extend([bv1_true, bv1_false, ite, no_poison, pair])
+
+        rewriter.insert_op_before_matched_op(ops)
+        return ((pair.results[0],), effect_state)
+
+
+class FPMakeOpSemantics(OperationSemantics):
+    """Lower ``fp.make(lo, hi, has_nan)`` to ``Pair(lo, Pair(hi, has_nan))``.
+
+    This assembles an abstract value from its components, matching the
+    nested-pair layout of ``FloatingPointAbsTypeSemantics``:
+    ``PairType(fp, PairType(fp, i1_lowered))``.
+    """
+
+    def get_semantics(
+        self,
+        operands: Sequence[SSAValue],
+        results: Sequence[Attribute],
+        attributes: Mapping[str, Attribute | SSAValue],
+        effect_state: SSAValue | None,
+        rewriter: PatternRewriter,
+    ) -> tuple[Sequence[SSAValue], SSAValue | None]:
+        lo, hi, has_nan = operands[0], operands[1], operands[2]
+
+        inner = PairOp(hi, has_nan)
+        outer = PairOp(lo, inner.results[0])
+        rewriter.insert_op_before_matched_op([inner, outer])
+        return ((outer.results[0],), effect_state)
 
 
 fp_semantics: dict[type[Operation], OperationSemantics] = {
@@ -203,6 +344,8 @@ fp_semantics: dict[type[Operation], OperationSemantics] = {
     FPNegOp: OpSemantics(smt_fp.NegOp),
     FPMaxOp: OpSemantics(smt_fp.MaxOp),
     FPMinOp: OpSemantics(smt_fp.MinOp),
+    FPMaximumFOp: OpSemantics(smt_fp.MaxOp),
+    FPMinimumFOp: OpSemantics(smt_fp.MinOp),
     # With rounding mode
     FPSqrtOp: RoundingModeOpSemantics(smt_fp.SqrtOp),
     FPAddOp: RoundingModeOpSemantics(smt_fp.AddOp),
@@ -213,7 +356,9 @@ fp_semantics: dict[type[Operation], OperationSemantics] = {
     FPConstantOp: FPConstantOpSemantics(),
     # Abs value ops
     FPGetOp: FPGetOpSemantics(),
+    FPMakeOp: FPMakeOpSemantics(),
     FPIsNanOp: FPIsNanOpSemantics(),
     FPPosInfOp: OpSemantics(lambda _: smt_fp.PositiveInfinityOp(_FP16_EB, _FP16_SB)),
     FPNegInfOp: OpSemantics(lambda _: smt_fp.NegativeInfinityOp(_FP16_EB, _FP16_SB)),
+    FPCmpOp: FPCmpOpSemantics(),
 }
