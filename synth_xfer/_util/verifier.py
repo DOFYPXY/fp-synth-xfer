@@ -42,6 +42,8 @@ from xdsl_smt.utils.transfer_function_util import (
     TransferFunction,
 )
 from z3 import ModelRef, Solver, parse_smt2_string, sat, unknown
+from .fp_semantics import FloatingPointAbsTypeSemantics, FloatingPointTypeSemantics, fp_semantics
+from synth_xfer.dialects.fp import FloatType, FPAbsValueType
 
 # TODO do we still need this
 _TMP_MODULE: list[ModuleOp] = []
@@ -78,6 +80,8 @@ def _lower_to_smt_module(module: ModuleOp, width: int, ctx: Context):
         AbstractValueType: AbstractValueTypeSemantics(),
         TransIntegerType: TransferIntegerTypeSemantics(width),
         TupleType: AbstractValueTypeSemantics(),
+        FloatType: FloatingPointTypeSemantics(),
+        FPAbsValueType: FloatingPointAbsTypeSemantics(),
     }
     SMTLowerer.op_semantics = {
         **arith_semantics,
