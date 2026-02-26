@@ -5,6 +5,7 @@ class AbstractDomain(Enum):
     KnownBits = "KnownBits", 2, None
     UConstRange = "UConstRange", 2, None
     SConstRange = "SConstRange", 2, None
+    FPRange = "FPRange", 3, None
     # Mod3 = "Mod3", 1, 3
     # Mod5 = "Mod5", 1, 5
     # Mod7 = "Mod7", 1, 7
