@@ -42,6 +42,7 @@ from xdsl_smt.utils.transfer_function_util import (
     TransferFunction,
 )
 from z3 import ModelRef, Solver, parse_smt2_string, sat, unknown
+
 from .fp_semantics import FloatingPointAbsTypeSemantics, FloatingPointTypeSemantics, fp_semantics
 from synth_xfer.dialects.fp import FloatType, FPAbsValueType
 
@@ -50,7 +51,7 @@ _TMP_MODULE: list[ModuleOp] = []
 
 
 def _verify_pattern(
-    ctx: Context, op: ModuleOp, timeout: int
+    ctx: Context, op: ModuleOp, timeout: int, use_cvc5: bool = False
 ) -> tuple[bool | None, ModelRef | None]:
     cloned_op = op.clone()
     LowerPairs().apply(ctx, cloned_op)
@@ -60,9 +61,14 @@ def _verify_pattern(
     stream = StringIO()
     print_to_smtlib(cloned_op, stream)
 
+    smt2_string = stream.getvalue()
+
+    if use_cvc5:
+        return _check_sat_cvc5(smt2_string, timeout)
+
     s = Solver()
     s.set(timeout=timeout * 1000)
-    s.add(parse_smt2_string(stream.getvalue()))
+    s.add(parse_smt2_string(smt2_string))
     r = s.check()
 
     if r == unknown:
@@ -71,6 +77,44 @@ def _verify_pattern(
         return False, s.model()
     else:
         return True, None
+
+
+def _check_sat_cvc5(
+    smt2_string: str, timeout: int
+) -> tuple[bool | None, object]:
+    from cvc5 import InputParser, InputLanguage
+    from cvc5 import Solver as Cvc5Solver
+    from cvc5 import SymbolManager
+
+    # Strip (check-sat) — we call checkSat() ourselves
+    smt2_string = smt2_string.replace("(check-sat)", "")
+
+    solver = Cvc5Solver()
+    solver.setOption("fp-exp", "true")
+    solver.setOption("produce-models", "true")
+    solver.setOption("tlimit-per", str(timeout * 1000))
+    solver.setLogic("ALL")
+
+    sm = SymbolManager(solver)
+    parser = InputParser(solver, sm)
+    parser.setStringInput(InputLanguage.SMT_LIB_2_6, smt2_string, "input")
+
+    while True:
+        cmd = parser.nextCommand()
+        if cmd.isNull():
+            break
+        cmd.invoke(solver, sm)
+
+    result = solver.checkSat()
+
+    if result.isUnsat():
+        return True, None
+    elif result.isSat():
+        terms = sm.getDeclaredTerms()
+        model_lines = [f"  {t} = {solver.getValue(t)}" for t in terms]
+        return False, "\n".join(model_lines)
+    else:
+        return None, None
 
 
 def _lower_to_smt_module(module: ModuleOp, width: int, ctx: Context):

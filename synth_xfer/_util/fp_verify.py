@@ -236,4 +236,4 @@ def verify_fp_transfer_function(
     query_module.body.block.add_ops(added_ops)
     FunctionCallInline(True, {}).apply(ctx, query_module)
 
-    return _verify_pattern(ctx, query_module, timeout)
+    return _verify_pattern(ctx, query_module, timeout, use_cvc5=True)
