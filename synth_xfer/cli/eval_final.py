@@ -290,9 +290,11 @@ def main() -> None:
         jobs: list[EvalJob] = []
         for solution_path, op_path, domain in solutions:
             if domain == AbstractDomain.FPRange:
-                assert exact_bw is None, "Exact bitwidth not supported for FPRange domain"
-                assert norm_bw == 16, (
-                    "Only 16-bit norm bitwidth supported for FPRange domain"
+                assert exact_bw is None or exact_bw == 16, (
+                    "Exact bitwidth must be 16 for FPRange domain"
+                )
+                assert norm_bw is None or norm_bw == 16, (
+                    "Norm bitwidth must be 16 for FPRange domain"
                 )
             sol_module = parse_mlir_mod(solution_path)
             xfer_name = resolve_xfer_name(get_fns(sol_module), args.xfer_name)
@@ -312,8 +314,12 @@ def main() -> None:
         assert args.domain is not None
         domain = AbstractDomain[args.domain]
         if domain == AbstractDomain.FPRange:
-            assert exact_bw is None, "Exact bitwidth not supported for FPRange domain"
-            assert norm_bw == 16, "Only 16-bit norm bitwidth supported for FPRange domain"
+            assert exact_bw is None or exact_bw == 16, (
+                "Exact bitwidth must be 16 for FPRange domain"
+            )
+            assert norm_bw is None or norm_bw == 16, (
+                "Norm bitwidth must be 16 for FPRange domain"
+            )
         sol_module = parse_mlir_mod(input_path)
         xfer_name = resolve_xfer_name(get_fns(sol_module), args.xfer_name)
         jobs = [

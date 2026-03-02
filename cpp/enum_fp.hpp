@@ -98,11 +98,37 @@ public:
     return result;
   }
 
-  // TODO: Generate "high" test cases: Random lattice + concrete sampling
-  EvalVec genHighs(unsigned int /* num_lat_samples */, unsigned int /* num_conc_samples */,
-                   std::mt19937 & /* rng */, const rngdist::Sampler & /* sampler */) {
-    // TODO: Implement mixed sampling: random lattice points + concrete value sampling
-    return EvalVec();
+  // Generate "high" test cases: Random lattice + concrete sampling
+  EvalVec genHighs(unsigned int num_lat_samples, unsigned int num_conc_samples,
+                   std::mt19937 &rng, const rngdist::Sampler &sampler) {
+    EvalVec result;
+    result.reserve(num_lat_samples);
+
+    for (unsigned int i = 0; i < num_lat_samples; ++i) {
+      ArgsTuple args = make_random_args(rng, sampler);
+      FPRange res = FPRange::bottom();
+
+      const std::uint64_t cap = static_cast<std::uint64_t>(num_conc_samples);
+      const std::uint64_t total_space = capped_concrete_space(args, cap);
+      if (total_space <= cap) {
+        res = toBestAbst(args);
+      } else {
+        for (unsigned int j = 0; j < num_conc_samples; ++j) {
+          std::array<std::uint16_t, N> concretes{};
+          fill_sampled_concretes(args, rng, concretes);
+
+          if (opCon && apply_n_ary(*opCon, concretes) == 0)
+            continue;
+
+          auto out = apply_n_ary(concOp, concretes);
+          res = res.join(FPRange::fromConcrete(out));
+        }
+      }
+
+      result.emplace_back(tuple_cat_result(args, res));
+    }
+
+    return result;
   }
 
 private:
@@ -125,6 +151,50 @@ private:
         },
         result);
     return result;
+  }
+
+  // Fill array with sampled concrete FP16 values from argument ranges
+  void fill_sampled_concretes(const ArgsTuple &args, std::mt19937 &rng,
+                              std::array<std::uint16_t, N> &out) const {
+    std::size_t i = 0;
+    std::apply(
+        [&](auto const &...elems) {
+          ((out[i++] = elems.sample_concrete(rng)), ...);
+        },
+        args);
+  }
+
+  // Compute product of concrete space sizes with overflow cap
+static std::uint64_t capped_concrete_space(const ArgsTuple &args,
+                                             std::uint64_t cap) {
+    std::uint64_t product = 1;
+    bool exceeded = false;
+
+    std::apply(
+        [&](auto const &...elems) {
+          auto handle = [&](auto const &elem) {
+            if (exceeded)
+              return;
+
+            std::uint64_t s = elem.size();
+
+            if (s == 0) {
+              s = 1;
+            }
+
+            if (product > cap / s) {
+              exceeded = true;
+              return;
+            }
+
+            product *= s;
+          };
+
+          (handle(elems), ...);
+        },
+        args);
+
+    return exceeded ? (cap + 1) : product;
   }
 
   // Compute best abstraction by enumerating all concrete combinations

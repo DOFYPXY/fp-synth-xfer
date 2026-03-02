@@ -131,41 +131,32 @@ struct FPRange {
     return res;
   }
 
-  std::uint16_t sample_concrete(std::mt19937 & /* rng */) const {
-    // TODO: Sample a concrete FP16 value uniformly from this range
-    // If has_nan, occasionally sample a NaN bit pattern
-    // Otherwise pick a random FP value in [lo, hi]
-    return 0;
-  }
+  std::uint16_t sample_concrete(std::mt19937 & rng) const {
+    std::uniform_int_distribution<std::uint16_t> bits_dist(0, 0xFFFFu);
+    std::uniform_int_distribution<int> nan_check(0, 999);
 
-  std::uint64_t size() const noexcept {
-    if (isBottom()) return 0;
-
-    std::uint16_t lo_sign = fp16::extract_sign(lo);
-    std::uint16_t hi_sign = fp16::extract_sign(hi);
-    std::uint16_t lo_exp = fp16::extract_exp(lo);
-    std::uint16_t hi_exp = fp16::extract_exp(hi);
-
-    std::uint16_t exp_count = 0;
-
-    if (lo_sign == 0 && hi_sign == 0) {
-      // Same sign: simple exponent range
-      exp_count = hi_exp - lo_exp + 1;
+    // With small probability, sample NaN if it's in the range
+    if (has_nan && nan_check(rng) == 0) {
+      return fp16::NAN_PATTERN;
     }
-    else if (lo_sign == 1 && hi_sign == 1) {
-      // Same sign: simple exponent range
-      exp_count = lo_exp - hi_exp + 1;
+
+    // Rejection sampling: repeatedly sample until we get a value in [lo, hi]
+    for (int attempts = 0; attempts < 1000; ++attempts) {
+      std::uint16_t candidate = bits_dist(rng);
+
+      // Skip NaN bit patterns if they're not allowed
+      if (!has_nan && fp16::is_nan(candidate)) {
+        continue;
+      }
+
+      // Check if candidate is within [lo, hi] using FP16 comparison
+      if (fp16::ge(candidate, lo) && fp16::le(candidate, hi)) {
+        return candidate;
+      }
     }
-    else {
-      // Crosses zero: sum positive and negative sections
-      exp_count = lo_exp + hi_exp + 2;
-    }
-    // clog to print the FPRange itself
-    // std::clog << *this << "\n";
-    // std::clog << "Size: exp_count=" << exp_count << ", has_nan=" << has_nan << "\n";
-    uint64_t total_size = exp_count + (has_nan ? 1 : 0);
-    // std::clog << "Total size: " << total_size << "\n";
-    return total_size;
+
+    // Fallback: return lo (guaranteed to be in range)
+    return lo;
   }
 
   // Distance metric
@@ -173,11 +164,63 @@ struct FPRange {
     // TODO: Define distance metric on the lattice
     // Example: count of bit patterns that differ between the two ranges
     // or symmetric difference of concrete sets
-    uint64_t this_size = size();
-    uint64_t rhs_size = rhs.size();
+    uint64_t this_size = norm();
+    uint64_t rhs_size = rhs.norm();
     // calculate size diff
     uint64_t size_diff = (this_size > rhs_size) ? (this_size - rhs_size) : (rhs_size - this_size);
     return size_diff;
+  }
+
+private:
+  // Helper: count exponents in the range [lo, hi]
+  std::uint16_t count_exponents() const noexcept {
+    if (isBottom()) return 0;
+
+    std::uint16_t lo_sign = fp16::extract_sign(lo);
+    std::uint16_t hi_sign = fp16::extract_sign(hi);
+    std::uint16_t lo_exp = fp16::extract_exp(lo);
+    std::uint16_t hi_exp = fp16::extract_exp(hi);
+
+    if (lo_sign == 0 && hi_sign == 0) {
+      // Positive range: simple exponent range
+      return hi_exp - lo_exp + 1;
+    }
+    else if (lo_sign == 1 && hi_sign == 1) {
+      // Negative range: simple exponent range
+      return lo_exp - hi_exp + 1;
+    }
+    else {
+      // Crosses zero: sum positive and negative sections
+      return lo_exp + hi_exp + 2;
+    }
+  }
+
+public:
+  std::uint64_t norm() const noexcept {
+    if (isBottom()) return 0;
+    std::uint64_t exp_count = const_cast<FPRange*>(this)->count_exponents();
+    return exp_count + (has_nan ? 1 : 0);
+  }
+
+  std::uint64_t size() const noexcept {
+    // Estimate upper bound of concrete space size without enumerating all values
+    // Returns an estimate of how many concrete FP16 values are in [lo, hi]
+
+    if (isBottom()) return 0;
+
+    std::uint64_t exp_count = const_cast<FPRange*>(this)->count_exponents();
+
+    // Each exponent has ~1024 mantissa values (2^10 for 10-bit mantissa in FP16)
+    // Plus some subnormal values, so use 1024 as conservative estimate
+    const std::uint64_t mantissa_values_per_exp = 1024;
+    std::uint64_t size_estimate = exp_count * mantissa_values_per_exp;
+
+    // Add 1 if NaN is present
+    if (has_nan) {
+      size_estimate += 1;
+    }
+
+    return size_estimate;
   }
 
   // Validation helper
