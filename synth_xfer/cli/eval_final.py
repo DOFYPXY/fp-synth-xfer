@@ -151,19 +151,28 @@ def run(
     top_mlir = top_as_xfer(helpers.transfer_func)
     lowerer.add_fn(helpers.meet_func)
     lowerer.add_fn(helpers.get_top_func)
-    top_xfer = lowerer.add_fn(top_mlir, shim=True)
-    lowerer.add_mod(sol_module, [xfer_name])
+
+    # Don't shim for FPRange (FloatType operations)
+    needs_shim = domain != AbstractDomain.FPRange
+    top_xfer = lowerer.add_fn(top_mlir, shim=needs_shim)
+
+    # Only add to shim list if needed
+    to_shim = [xfer_name] if needs_shim else []
+    lowerer.add_mod(sol_module, to_shim)
 
     jit = Jit()
     jit.add_mod(str(lowerer))
     to_eval = setup_eval(lbw, mbw, hbw, random_seed, helpers, jit, sampler)
+
+    # Use shimmed or non-shimmed function names based on domain
+    xfer_fn_suffix = "_shim" if needs_shim else ""
 
     eval_input = {
         bw: (
             to_eval[bw],
             [
                 jit.get_fn_ptr(top_xfer[bw].name),
-                jit.get_fn_ptr(f"{xfer_name}_{bw}_shim"),
+                jit.get_fn_ptr(f"{xfer_name}_{bw}{xfer_fn_suffix}"),
             ],
             [],
         )
@@ -270,6 +279,8 @@ def main() -> None:
     args = _reg_args()
     input_path = args.input_path
     bw_args = _parse_bw_args(args.exact_bw, args.norm_bw)
+    exact_bw = args.exact_bw[0] if args.exact_bw is not None else None
+    norm_bw = args.norm_bw[0] if args.norm_bw is not None else None
 
     if input_path.is_dir():
         if args.domain or args.op:
@@ -278,6 +289,11 @@ def main() -> None:
         solutions = _get_solutions(input_path)
         jobs: list[EvalJob] = []
         for solution_path, op_path, domain in solutions:
+            if domain == AbstractDomain.FPRange:
+                assert exact_bw is None, "Exact bitwidth not supported for FPRange domain"
+                assert norm_bw == 16, (
+                    "Only 16-bit norm bitwidth supported for FPRange domain"
+                )
             sol_module = parse_mlir_mod(solution_path)
             xfer_name = resolve_xfer_name(get_fns(sol_module), args.xfer_name)
             jobs.append(
@@ -295,6 +311,9 @@ def main() -> None:
     elif input_path.is_file():
         assert args.domain is not None
         domain = AbstractDomain[args.domain]
+        if domain == AbstractDomain.FPRange:
+            assert exact_bw is None, "Exact bitwidth not supported for FPRange domain"
+            assert norm_bw == 16, "Only 16-bit norm bitwidth supported for FPRange domain"
         sol_module = parse_mlir_mod(input_path)
         xfer_name = resolve_xfer_name(get_fns(sol_module), args.xfer_name)
         jobs = [
@@ -315,9 +334,6 @@ def main() -> None:
     else:
         with Pool() as p:
             data = p.map(_run_job, jobs)
-
-    exact_bw = args.exact_bw[0] if args.exact_bw is not None else None
-    norm_bw = args.norm_bw[0] if args.norm_bw is not None else None
 
     rows = []
     for job, (top_r, synth_r) in zip(jobs, data):

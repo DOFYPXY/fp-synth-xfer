@@ -6,7 +6,10 @@
 
 #include "domain.hpp"
 #include "enum.hpp"
+#include "enum_fp.hpp"
 #include "eval.hpp"
+#include "eval_fp.hpp"
+#include "fprange.hpp"
 #include "knownbits.hpp"
 #include "mod.hpp"
 #include "rand.hpp"
@@ -67,6 +70,119 @@ void register_results_class(py::module_ &m) {
     s.pop_back();
     return s;
   });
+}
+
+// FPRange-specific registration (not a Domain template)
+void register_fprange_class(py::module_ &m) {
+  auto cls = py::class_<FPRange>(m, "FPRange");
+  cls.def("__str__", [](const FPRange &self) {
+    std::ostringstream oss;
+    oss << self;
+    return oss.str();
+  });
+}
+
+// Register FPRange enumeration for a specific arity
+template <std::size_t N>
+void register_fprange_enum_arity(py::module_ &m) {
+  using EvalVec = typename EnumFP<N>::EvalVec;
+  using EnumT = EnumFP<N>;
+
+  std::string cls_name = std::string("ToEvalFPRange_") + std::to_string(N);
+
+  py::class_<EvalVec>(m, cls_name.c_str())
+      .def("__len__", [](const EvalVec &v) { return v.size(); })
+      .def(
+          "__getitem__",
+          [](const EvalVec &v, std::size_t i) -> const auto & {
+            if (i >= v.size())
+              throw py::index_error();
+            return v[i];
+          },
+          py::return_value_policy::reference_internal)
+      .def(
+          "__iter__",
+          [](const EvalVec &v) {
+            return py::make_iterator(v.begin(), v.end());
+          },
+          py::keep_alive<0, 1>());
+
+  std::string fn_suffix = "fprange_" + std::to_string(N);
+
+  using SamplerPtr = std::shared_ptr<rngdist::Sampler>;
+
+  m.def(
+      ("enum_low_" + fn_suffix).c_str(),
+      [](std::uintptr_t crtOpAddr, std::optional<std::uintptr_t> opConFnAddr) {
+        py::gil_scoped_release release;
+        EnumT ed{crtOpAddr, opConFnAddr};
+        return std::make_unique<EvalVec>(ed.genLows());
+      },
+      py::arg("crtOpAddr"), py::arg("opConFnAddr"),
+      py::return_value_policy::take_ownership);
+
+  m.def(("enum_mid_" + fn_suffix).c_str(),
+        [](std::uintptr_t crtOpAddr, std::optional<std::uintptr_t> opConFnAddr,
+           unsigned int num_lat_samples, unsigned int seed,
+           SamplerPtr sampler) {
+          py::gil_scoped_release release;
+
+          std::mt19937 rng(seed);
+          EnumT ed{crtOpAddr, opConFnAddr};
+          return std::make_unique<EvalVec>(
+              ed.genMids(num_lat_samples, rng, *sampler));
+        },
+        py::arg("crtOpAddr"), py::arg("opConFnAddr"),
+        py::arg("num_lat_samples"), py::arg("seed"), py::arg("sampler"),
+        py::return_value_policy::take_ownership);
+
+  m.def(("enum_high_" + fn_suffix).c_str(),
+        [](std::uintptr_t crtOpAddr, std::optional<std::uintptr_t> opConFnAddr,
+           unsigned int num_lat_samples, unsigned int num_conc_samples,
+           unsigned int seed, SamplerPtr sampler) {
+          py::gil_scoped_release release;
+
+          std::mt19937 rng(seed);
+          EnumT ed{crtOpAddr, opConFnAddr};
+          return std::make_unique<EvalVec>(
+              ed.genHighs(num_lat_samples, num_conc_samples, rng, *sampler));
+        },
+        py::arg("crtOpAddr"), py::arg("opConFnAddr"),
+        py::arg("num_lat_samples"), py::arg("num_conc_samples"),
+        py::arg("seed"), py::arg("sampler"),
+        py::return_value_policy::take_ownership);
+}
+
+void register_fprange_enum(py::module_ &m) {
+  register_fprange_enum_arity<1>(m);
+  register_fprange_enum_arity<2>(m);
+  register_fprange_enum_arity<3>(m);
+  register_fprange_enum_arity<4>(m);
+}
+
+// Register FPRange evaluation for a specific arity
+template <std::size_t N>
+void register_fprange_eval_arity(py::module_ &m) {
+  using EvalVec = typename EvalFP<N>::EvalVec;
+  using EvalT = EvalFP<N>;
+
+  std::string fn_name = "eval_fprange_" + std::to_string(N);
+
+  m.def(
+      fn_name.c_str(),
+      [](const EvalVec &v, const std::vector<std::uintptr_t> &xfers,
+         const std::vector<std::uintptr_t> &bases) -> Results {
+        py::gil_scoped_release release;
+        return EvalT{xfers, bases}.eval(v);
+      },
+      py::arg("to_eval"), py::arg("xfers"), py::arg("bases"));
+}
+
+void register_fprange_eval(py::module_ &m) {
+  register_fprange_eval_arity<1>(m);
+  register_fprange_eval_arity<2>(m);
+  register_fprange_eval_arity<3>(m);
+  register_fprange_eval_arity<4>(m);
 }
 
 template <template <std::size_t> class D, std::size_t BW>
@@ -252,6 +368,12 @@ MAKE_OPAQUE_UNIFORM(SConstRange, 16);
 MAKE_OPAQUE_UNIFORM(SConstRange, 32);
 MAKE_OPAQUE_UNIFORM(SConstRange, 64);
 
+// FPRange uses a different type system (not Domain template)
+PYBIND11_MAKE_OPAQUE(std::vector<std::tuple<FPRange, FPRange>>);  // 1-ary
+PYBIND11_MAKE_OPAQUE(std::vector<std::tuple<FPRange, FPRange, FPRange>>);  // 2-ary
+PYBIND11_MAKE_OPAQUE(std::vector<std::tuple<FPRange, FPRange, FPRange, FPRange>>);  // 3-ary
+PYBIND11_MAKE_OPAQUE(std::vector<std::tuple<FPRange, FPRange, FPRange, FPRange, FPRange>>);  // 4-ary
+
 // MAKE_OPAQUE_UNIFORM(Mod3, 4);
 // MAKE_OPAQUE_UNIFORM(Mod3, 8);
 // MAKE_OPAQUE_UNIFORM(Mod3, 16);
@@ -291,6 +413,12 @@ PYBIND11_MODULE(_eval_engine, m) {
   register_domain_widths<KnownBits, 4, 8, 16, 32, 64>(m);
   register_domain_widths<UConstRange, 4, 8, 16, 32, 64>(m);
   register_domain_widths<SConstRange, 4, 8, 16, 32, 64>(m);
+
+  // FPRange uses separate registration (not a Domain template)
+  register_fprange_class(m);
+  register_fprange_enum(m);
+  register_fprange_eval(m);
+
   // register_domain_widths<Mod3, 4, 8, 16, 32, 64>(m);
   // register_domain_widths<Mod5, 4, 8, 16, 32, 64>(m);
   // register_domain_widths<Mod7, 4, 8, 16, 32, 64>(m);

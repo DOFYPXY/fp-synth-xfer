@@ -26,8 +26,13 @@ class Jit:
     def __init__(self) -> None:
         self.mods: list[llvm.ModuleRef] = []
 
-    def add_mod(self, llvm_ir: str) -> llvm.ModuleRef:
+    def add_mod(self, llvm_ir: str, debug: bool = False) -> llvm.ModuleRef:
         mod = self.create_mod(llvm_ir)
+
+        if debug:
+            print("=== Adding Module LLVM IR ===")
+            print(str(mod))
+            print("=" * 50)
         self.run_passes(mod)
         self.engine.add_module(mod)
         self.engine.finalize_object()
@@ -62,3 +67,9 @@ class Jit:
         ptr = self.engine.get_function_address(fn)
         assert ptr != 0
         return ptr
+
+    def dump_module(self, index: int = -1) -> None:
+        """Dump LLVM IR for a module (default: last added)"""
+        print(f"=== Module {index} LLVM IR ===")
+        print(str(self.mods[index]))
+        print("=" * 50)
