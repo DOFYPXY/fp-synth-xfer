@@ -63,13 +63,22 @@ from xdsl_smt.dialects.transfer import (
 from synth_xfer.dialects.fp import (
     FloatType,
     FPAbsOp,
+    FPAbsValueType,
     FPAddOp,
+    FPCmpOp,
     FPConstantOp,
     FPDivOp,
+    FPGetOp,
+    FPIsNanOp,
+    FPMakeOp,
+    FPMaximumFOp,
     FPMaxOp,
+    FPMinimumFOp,
     FPMinOp,
     FPMulOp,
+    FPNegInfOp,
     FPNegOp,
+    FPPosInfOp,
     FPSqrtOp,
     FPSubOp,
 )
@@ -84,6 +93,8 @@ def lower_type(typ: Attribute, bw: int) -> ir.Type:
     elif isinstance(typ, FloatType):
         # Assume fp16 for floating point types
         return ir.HalfType()
+    elif isinstance(typ, FPAbsValueType):
+        return ir.LiteralStructType([ir.HalfType(), ir.HalfType(), ir.IntType(1)])
     elif isinstance(typ, AbstractValueType) or isinstance(typ, TupleType):
         fields = typ.get_fields()
         sub_type = lower_type(fields[0], bw)
@@ -477,9 +488,26 @@ class _LowerFuncToLLVM:
         )
 
     @add_op.register
+    def _(self, op: FPGetOp) -> None:
+        idx: int = op.attributes["index"].value.data  # type: ignore
+        res_name = self.result_name(op)
+        self.ssa_map[op.results[0]] = self.b.extract_value(
+            self.operands(op)[0], idx, name=res_name
+        )
+
+    @add_op.register
     def _(self, op: MakeOp) -> None:
         res_name = self.result_name(op)
 
+        res = ir.Constant(lower_type(op.results[0].type, self.bw), None)
+        for i, oprnd in enumerate(self.operands(op)):
+            res = self.b.insert_value(res, oprnd, i, name=res_name)
+
+        self.ssa_map[op.results[0]] = res
+
+    @add_op.register
+    def _(self, op: FPMakeOp) -> None:
+        res_name = self.result_name(op)
         res = ir.Constant(lower_type(op.results[0].type, self.bw), None)
         for i, oprnd in enumerate(self.operands(op)):
             res = self.b.insert_value(res, oprnd, i, name=res_name)
@@ -495,11 +523,15 @@ class _LowerFuncToLLVM:
         res_name = self.result_name(op)
         operand = self.operands(op)[0]
         # Use LLVM's fabs intrinsic
-        fabs_fn = ir.Function(
-            self.llvm_mod,
-            ir.FunctionType(ir.HalfType(), [ir.HalfType()]),
-            name="llvm.fabs.f16",
-        )
+        fnc_name = "llvm.fabs.f16"
+        if fnc_name not in self.llvm_mod.globals:
+            fabs_fn = ir.Function(
+                self.llvm_mod,
+                ir.FunctionType(ir.HalfType(), [ir.HalfType()]),
+                name=fnc_name,
+            )
+        else:
+            fabs_fn = self.llvm_mod.globals[fnc_name]
         self.ssa_map[op.results[0]] = self.b.call(fabs_fn, [operand], name=res_name)
 
     @add_op.register
@@ -521,11 +553,15 @@ class _LowerFuncToLLVM:
         res_name = self.result_name(op)
         operand = self.operands(op)[0]
         # Use LLVM's sqrt intrinsic
-        sqrt_fn = ir.Function(
-            self.llvm_mod,
-            ir.FunctionType(ir.HalfType(), [ir.HalfType()]),
-            name="llvm.sqrt.f16",
-        )
+        fnc_name = "llvm.sqrt.f16"
+        if fnc_name not in self.llvm_mod.globals:
+            sqrt_fn = ir.Function(
+                self.llvm_mod,
+                ir.FunctionType(ir.HalfType(), [ir.HalfType()]),
+                name=fnc_name,
+            )
+        else:
+            sqrt_fn = self.llvm_mod.globals[fnc_name]
         self.ssa_map[op.results[0]] = self.b.call(sqrt_fn, [operand], name=res_name)
 
     @add_op.register
@@ -533,11 +569,15 @@ class _LowerFuncToLLVM:
         res_name = self.result_name(op)
         lhs, rhs = self.operands(op)
         # Use LLVM's maxnum intrinsic
-        maxnum_fn = ir.Function(
-            self.llvm_mod,
-            ir.FunctionType(ir.HalfType(), [ir.HalfType(), ir.HalfType()]),
-            name="llvm.maxnum.f16",
-        )
+        fnc_name = "llvm.maxnum.f16"
+        if fnc_name not in self.llvm_mod.globals:
+            maxnum_fn = ir.Function(
+                self.llvm_mod,
+                ir.FunctionType(ir.HalfType(), [ir.HalfType(), ir.HalfType()]),
+                name=fnc_name,
+            )
+        else:
+            maxnum_fn = self.llvm_mod.globals[fnc_name]
         self.ssa_map[op.results[0]] = self.b.call(maxnum_fn, [lhs, rhs], name=res_name)
 
     @add_op.register
@@ -545,12 +585,92 @@ class _LowerFuncToLLVM:
         res_name = self.result_name(op)
         lhs, rhs = self.operands(op)
         # Use LLVM's minnum intrinsic
-        minnum_fn = ir.Function(
-            self.llvm_mod,
-            ir.FunctionType(ir.HalfType(), [ir.HalfType(), ir.HalfType()]),
-            name="llvm.minnum.f16",
-        )
+        fnc_name = "llvm.minnum.f16"
+        if fnc_name not in self.llvm_mod.globals:
+            minnum_fn = ir.Function(
+                self.llvm_mod,
+                ir.FunctionType(ir.HalfType(), [ir.HalfType(), ir.HalfType()]),
+                name=fnc_name,
+            )
+        else:
+            minnum_fn = self.llvm_mod.globals[fnc_name]
         self.ssa_map[op.results[0]] = self.b.call(minnum_fn, [lhs, rhs], name=res_name)
+
+    @add_op.register
+    def _(self, op: FPMaximumFOp | FPMinimumFOp) -> None:
+        res_name = self.result_name(op)
+        lhs, rhs = self.operands(op)
+
+        if isinstance(op, FPMaximumFOp):
+            fnc_name = "llvm.maximum.f16"
+        else:
+            fnc_name = "llvm.minimum.f16"
+
+        if fnc_name not in self.llvm_mod.globals:
+            fn = ir.Function(
+                self.llvm_mod,
+                ir.FunctionType(ir.HalfType(), [ir.HalfType(), ir.HalfType()]),
+                name=fnc_name,
+            )
+        else:
+            fn = self.llvm_mod.globals[fnc_name]
+
+        self.ssa_map[op.results[0]] = self.b.call(fn, [lhs, rhs], name=res_name)
+
+    @add_op.register
+    def _(self, op: FPIsNanOp) -> None:
+        res_name = self.result_name(op)
+        operand = self.operands(op)[0]
+        self.ssa_map[op.results[0]] = self.b.fcmp_unordered(
+            "!=", operand, operand, name=res_name
+        )
+
+    @add_op.register
+    def _(self, op: FPPosInfOp | FPNegInfOp) -> None:
+        res_name = self.result_name(op)
+        if isinstance(op, FPNegInfOp):
+            val = float("-inf")
+        else:
+            val = float("inf")
+
+        self.ssa_map[op.results[0]] = ir.Constant(ir.HalfType(), val)
+
+    @add_op.register
+    def _(self, op: FPCmpOp) -> None:
+        res_name = self.result_name(op)
+        lhs, rhs = self.operands(op)
+
+        pred = op.predicate.data
+
+        ordered_map = {
+            "oeq": "==",
+            "one": "!=",
+            "olt": "<",
+            "ole": "<=",
+            "ogt": ">",
+            "oge": ">=",
+        }
+        unordered_map = {
+            "ueq": "==",
+            "une": "!=",
+            "ult": "<",
+            "ule": "<=",
+            "ugt": ">",
+            "uge": ">=",
+        }
+
+        if pred == "false":
+            result = ir.Constant(ir.IntType(1), 0)
+        elif pred == "true":
+            result = ir.Constant(ir.IntType(1), 1)
+        elif pred in ordered_map:
+            result = self.b.fcmp_ordered(ordered_map[pred], lhs, rhs, name=res_name)
+        elif pred in unordered_map:
+            result = self.b.fcmp_unordered(unordered_map[pred], lhs, rhs, name=res_name)
+        else:
+            raise ValueError(f"Unsupported fp.cmp predicate: {pred}")
+
+        self.ssa_map[op.results[0]] = result
 
     @add_op.register
     def _(

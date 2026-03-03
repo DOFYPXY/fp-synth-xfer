@@ -16,23 +16,18 @@ Publication: [Nice to Meet You: Synthesizing Practical MLIR Abstract Transformer
 
 ## Setup
 
-1. Create and activate a Python virtual environment:
-
+1. Create and activate a Python virtual environment.
 ```bash
-# create the venv
 python3 -m venv .venv
-# activate it
 source .venv/bin/activate
 ```
 2. Install in editable mode with dev dependencies:
 ```bash
 pip install -e ".[dev]"
 ```
-
-3. Run tests to verify the C++ bindings built correctly:
-
+3. Run tests to confirm the C++ bindings built correctly:
 ```bash
-pytest
+pytest -vv
 ```
 
 ## Usage
@@ -76,7 +71,7 @@ Final Soln   | Exact 96.7078% | 3 solutions |
 
 The command reads the MLIR program `mlir/Operations/And.mlir` and writes addtional output infor into `outputs/KnownBits_And/`.
 
-### Full experiment setup
+### Full Experiment Setup
 
 This is a more comprehensive invocation closer to the experiment setup used in the paper (this can take up to an hour depending on your machine):
 

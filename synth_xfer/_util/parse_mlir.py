@@ -12,12 +12,14 @@ from xdsl_smt.dialects.transfer import AbstractValueType, Transfer, TransInteger
 from xdsl_smt.passes.transfer_inline import FunctionCallInline
 
 from synth_xfer._util.domain import AbstractDomain
+from synth_xfer.dialects.fp import FP, FloatType, FPAbsValueType
 
 _ctx = Context()
 _ctx.load_dialect(Arith)
 _ctx.load_dialect(Builtin)
 _ctx.load_dialect(Func)
 _ctx.load_dialect(Transfer)
+_ctx.load_dialect(FP)
 
 
 @runtime_checkable
@@ -69,8 +71,8 @@ def get_fns(mod: ModuleOp) -> dict[str, FuncOp]:
 
 @dataclass
 class HelperFuncs:
-    conc_ret_ty: TransIntegerType | IntegerType
-    conc_arg_ty: tuple[TransIntegerType | IntegerType, ...]
+    conc_ret_ty: TransIntegerType | IntegerType | FloatType
+    conc_arg_ty: tuple[TransIntegerType | IntegerType | FloatType, ...]
     domain: AbstractDomain
     crt_func: FuncOp
     instance_constraint_func: FuncOp
@@ -92,11 +94,19 @@ def get_helper_funcs(p: Path, d: AbstractDomain) -> HelperFuncs:
     assert len(crt_func.function_type.outputs.data) == 1
 
     def get_ty(x: Attribute):
-        assert isinstance(x, TransIntegerType) or isinstance(x, IntegerType)
-        return x
+        if isinstance(x, (TransIntegerType, IntegerType, FloatType)):
+            return x
+        raise TypeError(f"Expected TransIntegerType, IntegerType, or FloatType, got {type(x)}")
 
     def make_abst_ty(x: Attribute):
-        return AbstractValueType([x for _ in range(d.vec_size)])
+        if d.const_bw is None:
+            # For FloatType (concrete), represent as i16 (FP16 bit pattern) in abstract domain
+            if isinstance(x, FloatType):
+                return AbstractValueType([IntegerType(16) for _ in range(d.vec_size)])
+            # Standard case: repeat the type vec_size times
+            return AbstractValueType([x for _ in range(d.vec_size)])
+        else:
+            return AbstractValueType([IntegerType(d.const_bw) for _ in range(d.vec_size)])
 
     crt_ret_ty = get_ty(crt_func.function_type.outputs.data[0])
     crt_arg_ty = tuple(get_ty(x.type) for x in crt_func.args)
