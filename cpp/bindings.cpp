@@ -8,7 +8,7 @@
 #include "enum.hpp"
 #include "eval.hpp"
 #include "knownbits.hpp"
-#include "mod.hpp"
+// #include "mod.hpp"
 #include "rand.hpp"
 #include "results.hpp"
 #include "sconst_range.hpp"
