@@ -96,13 +96,15 @@ def get_helper_funcs(p: Path, d: AbstractDomain) -> HelperFuncs:
     def get_ty(x: Attribute):
         if isinstance(x, (TransIntegerType, IntegerType, FloatType)):
             return x
-        raise TypeError(f"Expected TransIntegerType, IntegerType, or FloatType, got {type(x)}")
+        raise TypeError(
+            f"Expected TransIntegerType, IntegerType, or FloatType, got {type(x)}"
+        )
 
     def make_abst_ty(x: Attribute):
         if d.const_bw is None:
-            # For FloatType (concrete), represent as i16 (FP16 bit pattern) in abstract domain
-            if isinstance(x, FloatType):
-                return AbstractValueType([IntegerType(16) for _ in range(d.vec_size)])
+            # For FloatType in FPRange domain, use FPAbsValueType
+            if isinstance(x, FloatType) and d == AbstractDomain.FPRange:
+                return FPAbsValueType()
             # Standard case: repeat the type vec_size times
             return AbstractValueType([x for _ in range(d.vec_size)])
         else:

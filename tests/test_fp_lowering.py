@@ -31,8 +31,8 @@ def test_lower_fp_mlir_files(rel_path: str) -> None:
     else:
         raise AssertionError(f"Unexpected MLIR op type: {type(mlir_op).__name__}")
 
-    # print(f"\n--- Lowering for {rel_path} ---")
-    # print(lowerer)
+    print(f"\n--- Lowering for {rel_path} ---")
+    print(lowerer)
 
     # Ensure we produced at least one LLVM function.
     assert lowerer.fns

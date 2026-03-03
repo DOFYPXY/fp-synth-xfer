@@ -9,6 +9,7 @@ from synth_xfer._util.jit import Jit
 from synth_xfer._util.lower import LowerToLLVM
 from synth_xfer._util.parse_mlir import HelperFuncs
 from synth_xfer._util.random import Sampler
+from synth_xfer.dialects.fp import FloatType
 
 if TYPE_CHECKING:
     from synth_xfer._eval_engine import Results, ToEval
@@ -28,7 +29,15 @@ def get_per_bit(a: "Results") -> list[PerBitRes]:
         return eval(s)
 
     def get_floats(s: str) -> list[float]:
-        return eval(s)
+        import math
+
+        # Replace nan and inf with their math module equivalents
+        s_clean = (
+            s.replace("nan", "math.nan")
+            .replace("inf", "math.inf")
+            .replace("-inf", "-math.inf")
+        )
+        return eval(s_clean, {"math": math})
 
     bw = get(x[0], "bw", int)
     num_cases = get(x[1], "num cases", int)
@@ -76,24 +85,39 @@ def setup_eval(
 ) -> dict[int, "ToEval"]:
     all_bws = lbw + [x[0] for x in mbw] + [x[0] for x in hbw]
     lowerer = LowerToLLVM(all_bws)
-    crt = lowerer.add_fn(helper_funcs.crt_func, shim=True)
+
+    # Always shim concrete ops to the integer bit-pattern ABI expected by enum engine.
+    # This is especially important for FPRange where concrete ops are lowered as
+    # half -> half but EnumFP expects uint16_t/uint64_t bit representations.
+    needs_shim = True
+
+    crt = lowerer.add_fn(helper_funcs.crt_func, shim=needs_shim)
     op_constraint = (
-        lowerer.add_fn(helper_funcs.op_constraint_func, shim=True)
+        lowerer.add_fn(helper_funcs.op_constraint_func, shim=needs_shim)
         if helper_funcs.op_constraint_func
         else None
     )
 
     jit.add_mod(str(lowerer))
 
-    def get_bw(x: TransIntegerType | IntegerType, bw: int):
+    def get_bw(x: TransIntegerType | IntegerType | FloatType, bw: int):
+        assert isinstance(x, (TransIntegerType, IntegerType)), (
+            f"Expected TransIntegerType or IntegerType, got {type(x).__name__}"
+        )
         return bw if isinstance(x, TransIntegerType) else x.width.data
 
     def get_enum_f(level: str, bw: int) -> Callable:
         domain_str = str(helper_funcs.domain).lower()
-        ret_bw = get_bw(helper_funcs.conc_ret_ty, bw)
-        arg_bws = [str(get_bw(x, bw)) for x in helper_funcs.conc_arg_ty]
-        arg_str = "_".join(arg_bws)
-        func_name = f"enum_{level}_{domain_str}_{ret_bw}_{arg_str}"
+
+        # FPRange uses arity-based naming instead of bitwidth-based
+        if domain_str == "fprange":
+            arity = len(helper_funcs.conc_arg_ty)
+            func_name = f"enum_{level}_fprange_{arity}"
+        else:
+            ret_bw = get_bw(helper_funcs.conc_ret_ty, bw)
+            arg_bws = [str(get_bw(x, bw)) for x in helper_funcs.conc_arg_ty]
+            arg_str = "_".join(arg_bws)
+            func_name = f"enum_{level}_{domain_str}_{ret_bw}_{arg_str}"
 
         try:
             enum_fn = getattr(_eval_engine, func_name)

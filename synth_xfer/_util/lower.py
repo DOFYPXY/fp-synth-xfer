@@ -94,7 +94,9 @@ def lower_type(typ: Attribute, bw: int) -> ir.Type:
         # Assume fp16 for floating point types
         return ir.HalfType()
     elif isinstance(typ, FPAbsValueType):
-        return ir.LiteralStructType([ir.HalfType(), ir.HalfType(), ir.IntType(1)])
+        # FPRange is packed into a single uint64_t for better ABI compatibility
+        # Layout: lo(16) | hi(16) | has_nan(8) | padding(24)
+        return ir.IntType(64)
     elif isinstance(typ, AbstractValueType) or isinstance(typ, TupleType):
         fields = typ.get_fields()
         sub_type = lower_type(fields[0], bw)
@@ -127,12 +129,12 @@ class LowerToLLVM:
 
     @staticmethod
     def is_concrete_op(mlir_fn: FuncOp) -> bool:
-        def trans_or_int(x: Attribute):
-            return isinstance(x, TransIntegerType) or isinstance(x, IntegerType)
+        def trans_or_int_or_float(x: Attribute):
+            return isinstance(x, (TransIntegerType, IntegerType, FloatType))
 
         one_ret_val = len(mlir_fn.function_type.outputs.data) == 1
-        valid_ret = trans_or_int(mlir_fn.function_type.outputs.data[0])
-        valid_args = all(trans_or_int(x.type) for x in mlir_fn.args)
+        valid_ret = trans_or_int_or_float(mlir_fn.function_type.outputs.data[0])
+        valid_args = all(trans_or_int_or_float(x.type) for x in mlir_fn.args)
 
         return one_ret_val and valid_ret and valid_args
 
@@ -150,6 +152,8 @@ class LowerToLLVM:
     @staticmethod
     def is_transfer_fn(mlir_fn: FuncOp) -> bool:
         def is_abst_val(ty: Attribute):
+            if isinstance(ty, FPAbsValueType):
+                return True
             if isinstance(ty, AbstractValueType):
                 all_trans = all(isinstance(x, TransIntegerType) for x in ty.get_fields())
                 all_ints = all(isinstance(x, IntegerType) for x in ty.get_fields())
@@ -257,10 +261,22 @@ class LowerToLLVM:
         new_args: list[ir.Argument] = []
         for arg, mlir_arg in zip(shim_fn.args, mlir_fn.args):
             arg.name = f"{arg.name}_wide"
-            new_args.append(b.trunc(arg, lower_type(mlir_arg.type, bw)))  # type: ignore
+            arg_ty = lower_type(mlir_arg.type, bw)
+            if isinstance(arg_ty, ir.HalfType):
+                i16_arg = b.trunc(arg, ir.IntType(16))
+                as_half = b.bitcast(i16_arg, ir.HalfType())
+                assert as_half is not None
+                new_args.append(as_half)
+            else:
+                new_args.append(b.trunc(arg, arg_ty))  # type: ignore
 
         r_n = b.call(old_fn, new_args)
-        b.ret(b.zext(r_n, wide_t))
+        if isinstance(old_fn.function_type.return_type, ir.HalfType):
+            as_i16 = b.bitcast(r_n, ir.IntType(16))
+            assert as_i16 is not None
+            b.ret(b.zext(as_i16, wide_t))
+        else:
+            b.ret(b.zext(r_n, wide_t))
 
         return shim_fn
 
@@ -491,9 +507,29 @@ class _LowerFuncToLLVM:
     def _(self, op: FPGetOp) -> None:
         idx: int = op.attributes["index"].value.data  # type: ignore
         res_name = self.result_name(op)
-        self.ssa_map[op.results[0]] = self.b.extract_value(
-            self.operands(op)[0], idx, name=res_name
-        )
+        packed = self.operands(op)[0]
+
+        # Todo: This is a hardcoded unpacking.
+        # Extract from packed i64: lo(0-15) | hi(16-31) | has_nan(32-39)
+        if idx == 0:  # lo
+            # Extract bits 0-15 and bitcast to half
+            bits = self.b.trunc(packed, ir.IntType(16))
+            self.ssa_map[op.results[0]] = self.b.bitcast(
+                bits, ir.HalfType(), name=res_name
+            )
+        elif idx == 1:  # hi
+            # Extract bits 16-31 and bitcast to half
+            shifted = self.b.lshr(packed, ir.Constant(ir.IntType(64), 16))
+            bits = self.b.trunc(shifted, ir.IntType(16))
+            self.ssa_map[op.results[0]] = self.b.bitcast(
+                bits, ir.HalfType(), name=res_name
+            )
+        elif idx == 2:  # has_nan
+            # Extract bit 32 and trunc to i1
+            shifted = self.b.lshr(packed, ir.Constant(ir.IntType(64), 32))
+            self.ssa_map[op.results[0]] = self.b.trunc(
+                shifted, ir.IntType(1), name=res_name
+            )
 
     @add_op.register
     def _(self, op: MakeOp) -> None:
@@ -508,11 +544,29 @@ class _LowerFuncToLLVM:
     @add_op.register
     def _(self, op: FPMakeOp) -> None:
         res_name = self.result_name(op)
-        res = ir.Constant(lower_type(op.results[0].type, self.bw), None)
-        for i, oprnd in enumerate(self.operands(op)):
-            res = self.b.insert_value(res, oprnd, i, name=res_name)
+        operands = self.operands(op)
 
-        self.ssa_map[op.results[0]] = res
+        # Pack three values into i64: lo(0-15) | hi(16-31) | has_nan(32-39)
+        # operands[0]: half (lo), operands[1]: half (hi), operands[2]: i1 (has_nan)
+
+        # Convert lo (half) to i16, then zext to i64
+        lo_bits = self.b.bitcast(operands[0], ir.IntType(16))
+        lo_i64 = self.b.zext(lo_bits, ir.IntType(64))
+
+        # Convert hi (half) to i16, zext to i64, shift left 16
+        hi_bits = self.b.bitcast(operands[1], ir.IntType(16))
+        hi_i64 = self.b.zext(hi_bits, ir.IntType(64))
+        hi_shifted = self.b.shl(hi_i64, ir.Constant(ir.IntType(64), 16))
+
+        # Convert has_nan (i1) to i64, shift left 32
+        nan_i64 = self.b.zext(operands[2], ir.IntType(64))
+        nan_shifted = self.b.shl(nan_i64, ir.Constant(ir.IntType(64), 32))
+
+        # Combine all three with OR
+        result = self.b.or_(lo_i64, hi_shifted)
+        result = self.b.or_(result, nan_shifted, name=res_name)
+
+        self.ssa_map[op.results[0]] = result
 
     @add_op.register
     def _(self, op: ReturnOp) -> None:
@@ -541,7 +595,6 @@ class _LowerFuncToLLVM:
 
     @add_op.register
     def _(self, op: FPNegOp) -> None:
-        res_name = self.result_name(op)
         operand = self.operands(op)[0]
         # fneg in llvmlite returns None, so use it without name
         result = self.b.fneg(operand)
@@ -627,7 +680,6 @@ class _LowerFuncToLLVM:
 
     @add_op.register
     def _(self, op: FPPosInfOp | FPNegInfOp) -> None:
-        res_name = self.result_name(op)
         if isinstance(op, FPNegInfOp):
             val = float("-inf")
         else:

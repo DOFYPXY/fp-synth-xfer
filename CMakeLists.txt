@@ -37,6 +37,7 @@ set(SYNTH_XFER_SOURCES
   cpp/eval.hpp
   cpp/enum.hpp
   cpp/domain.hpp
+  cpp/fprange.hpp
   cpp/knownbits.hpp
   cpp/uconst_range.hpp
   cpp/sconst_range.hpp
