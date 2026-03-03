@@ -15,6 +15,7 @@ dependencies = [
   "xdsl>=0.48.3",
   "xdsl-smt @ https://github.com/dominicmkennedy/xdsl-smt/archive/38efbd0.tar.gz",
   "z3-solver==4.15.1.0",
+  "cvc5",
   "llvmlite>=0.45.0",
   "pandas==2.3.3",
   "egglog>=1.0.0",
