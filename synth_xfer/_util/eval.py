@@ -179,7 +179,9 @@ def eval_transfer_func(
     def get_eval_f(x: "ToEval") -> Callable[["ToEval", list[int], list[int]], "Results"]:
         suffix = x.__class__.__name__.lower()[6:]
         i = next(k for k, c in enumerate(suffix) if c.isdigit())
-        suffix = suffix[:i] + "_" + suffix[i:]
+        # Only add underscore if one doesn't already exist
+        if i == 0 or suffix[i - 1] != "_":
+            suffix = suffix[:i] + "_" + suffix[i:]
         func_name = f"eval_{suffix}"
 
         try:
