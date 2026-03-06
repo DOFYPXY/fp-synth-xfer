@@ -149,6 +149,7 @@ def _lower_to_smt_module(module: ModuleOp, width: int, ctx: Context):
         **arith_semantics,
         **transfer_semantics,
         **comb_semantics,
+        **fp_semantics,
     }
 
     LowerToSMTPass().apply(ctx, module)
