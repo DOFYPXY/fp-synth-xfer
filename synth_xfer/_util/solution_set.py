@@ -244,11 +244,11 @@ class UnsizedSolutionSet(SolutionSet):
                     rewritten: FunctionWithCondition,
                 ) -> bool:
                     is_sound, _ = verify_function(
-                        bw,
                         original.get_function(),
                         [original.func, original.cond],
                         helper_funcs,
                         200,
+                        bw=bw
                     )
                     if is_sound is None:
                         logger.info(
@@ -264,11 +264,11 @@ class UnsizedSolutionSet(SolutionSet):
                         return False
                     if self.optimize:
                         is_sound_rwt, _ = verify_function(
-                            bw,
                             rewritten.get_function(),
                             [rewritten.func, rewritten.cond],
                             helper_funcs,
                             200,
+                            bw=bw
                         )
                         if is_sound != is_sound_rwt:
                             logger.info(

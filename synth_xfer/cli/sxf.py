@@ -64,9 +64,9 @@ def _eval_helper(
 
 
 def _setup_context(
-    r: Random, use_full_i1_ops: bool, dsl_ops: DslOpSet | None
+    r: Random, use_full_i1_ops: bool, dsl_ops: DslOpSet | None, domain: AbstractDomain
 ) -> SynthesizerContext:
-    c = SynthesizerContext(r, dsl_ops=dsl_ops)
+    c = SynthesizerContext(r, dsl_ops=dsl_ops, domain=domain)
     c.set_cmp_flags([0, 6, 7])
     if not use_full_i1_ops and dsl_ops is None:
         c.use_basic_i1_ops()
@@ -121,9 +121,9 @@ def run(
     solution_eval_func = _eval_helper(to_eval, all_bws, helper_funcs, jit)
     solution_set = UnsizedSolutionSet([], solution_eval_func, optimize=optimize)
 
-    context = _setup_context(random, False, dsl_ops)
-    context_weighted = _setup_context(random, False, dsl_ops)
-    context_cond = _setup_context(random, True, dsl_ops)
+    context = _setup_context(random, False, dsl_ops, domain)
+    context_weighted = _setup_context(random, False, dsl_ops, domain)
+    context_cond = _setup_context(random, True, dsl_ops, domain)
 
     start_time = perf_counter()
     init_cmp_res = solution_set.eval_improve([])[0]
@@ -163,6 +163,7 @@ def run(
             current_prog_len,
             current_num_steps,
             condition_length,
+            bw=lbw[0]
         )
 
         solution_set = synthesize_one_iteration(
