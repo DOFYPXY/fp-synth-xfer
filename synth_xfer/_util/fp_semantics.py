@@ -1,6 +1,8 @@
 import struct
 from typing import Callable, Mapping, Sequence
 
+from xdsl.dialects.builtin import FloatAttr
+from xdsl.dialects.smt import BitVectorType, BoolType
 from xdsl.ir import (
     Attribute,
     Operation,
@@ -9,11 +11,8 @@ from xdsl.ir import (
 from xdsl.pattern_rewriter import (
     PatternRewriter,
 )
-from xdsl.dialects.builtin import FloatAttr
-
 import xdsl_smt.dialects.smt_bitvector_dialect as smt_bv
 import xdsl_smt.dialects.smt_floatingpoint_dialect as smt_fp
-from xdsl.dialects.smt import BitVectorType, BoolType
 from xdsl_smt.dialects.smt_floatingpoint_dialect import FloatingPointType
 from xdsl_smt.dialects.smt_utils_dialect import FirstOp, PairOp, PairType, SecondOp
 from xdsl_smt.semantics.semantics import (
@@ -114,9 +113,7 @@ class FPConstantOpSemantics(OperationSemantics):
 
         fp_const = smt_fp.ConstantOp(sign_op.res, exp_op.res, mant_op.res)
 
-        rewriter.insert_op_before_matched_op(
-            [sign_op, exp_op, mant_op, fp_const]
-        )
+        rewriter.insert_op_before_matched_op([sign_op, exp_op, mant_op, fp_const])
         return ((fp_const.result,), effect_state)
 
 
