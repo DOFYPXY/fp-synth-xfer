@@ -41,8 +41,8 @@ from dataclasses import dataclass
 class MutationFlags:
     replace_entire_op: bool = True # Exists 
     replace_operand: bool = True # Exists
-    rewire_make_op: bool = False # New
-    perturb_constant: bool = False # New
+    rewire_make_op: bool = True # New
+    perturb_constant: bool = True # New
     replace_op_window: bool = False # New
     
 class MCMCSampler:
@@ -53,6 +53,7 @@ class MCMCSampler:
     cost_func: Callable[[EvalResult, float], float]
     step_cnt: int
     total_steps: int
+    bw: int
     is_cond: bool
     length: int
     flags: MutationFlags
@@ -64,11 +65,13 @@ class MCMCSampler:
         cost_func: Callable[[EvalResult, float], float],
         length: int,
         total_steps: int,
+        bw: int = 4,
         reset_init_program: bool = True,
         random_init_program: bool = True,
         is_cond: bool = False,
         flags: MutationFlags | None = None,
     ):
+        self.bw = bw
         self.is_cond = is_cond
         self.flags = flags or MutationFlags() 
         if is_cond:
@@ -100,16 +103,19 @@ class MCMCSampler:
     def accept_proposed(self, proposed_cmp: EvalResult):
         if self.current.old_ops is not None:
             self.current.remove_history_window()
-        else:
+        elif self.current.old_op is not None:
             self.current.remove_history()
+        # else: mutation was a no-op (e.g. rewire_make_op found no valid operands)
         self.current_cmp = proposed_cmp
         self.step_cnt += 1
+
 
     def reject_proposed(self):
         if self.current.old_ops is not None:
             self.current.revert_window()
-        else:
+        elif self.current.old_op is not None:
             self.current.revert_operation()
+        # else: mutation was a no-op, nothing to revert
         self.step_cnt += 1
 
     def replace_entire_operation(self, idx: int, history: bool):
@@ -143,9 +149,12 @@ class MCMCSampler:
             
     def rewire_make_op(self, history: bool):
         ops = self.current.ops
-        make_op_idx = len(ops) - 2
-        make_op = ops[make_op_idx]
-        assert isinstance(make_op, MakeOp)
+        
+        make_op = next((op for op in reversed(ops) if isinstance(op, MakeOp)), None)
+        if make_op is None:
+            return  # is_cond programs have no MakeOp
+        
+        make_op_idx = ops.index(make_op)
 
         # Pick a random operand of MakeOp to rewire
         ith = self.context.random.randint(0, len(make_op.operands) - 1)
@@ -157,13 +166,19 @@ class MCMCSampler:
         # Get valid int operands before MakeOp
         vals = self.current.get_valid_operands(make_op_idx, INT_T)
         if not vals:
-            # Nothing to rewire, revert silently
             self.current.subst_operation(new_make_op, new_make_op.clone(), False)
             return
 
         success = False
         while not success:
             success = self.context.replace_operand(new_make_op, ith, vals)
+            
+    def _has_useful_perturbation(self) -> bool:
+        """Returns False for domains where constant perturbation adds no value."""
+        domain = self.context.domain
+        if domain == AbstractDomain.KnownBits:
+            return False  # only 0/1 are meaningful, already covered by replace_entire
+        return True
 
     def perturb_constant(self, history: bool):
         ops = self.current.ops
@@ -176,22 +191,27 @@ class MCMCSampler:
 
         old_const, idx = self.random.choice(const_ops)
         ref_val = old_const.op
+
         new_val = self._sample_perturbed_constant(old_const.value.value.data)
         new_const = Constant(ref_val, new_val)
         self.current.subst_operation(old_const, new_const, history)
-
+    
     def _sample_perturbed_constant(self, current_val: int) -> int:
         domain = self.context.domain
         if domain == AbstractDomain.FPRange:
             candidates = self._fp_constant_candidates()
         elif domain == AbstractDomain.KnownBits:
             candidates = self._kb_constant_candidates()
+            max_val = (1 << self.bw) - 1
+            candidates = list({c & max_val for c in candidates})
         else:
             candidates = self._cr_constant_candidates()
+            max_val = (1 << self.bw) - 1
+            candidates = list({c & max_val for c in candidates})
 
         filtered = [c for c in candidates if c != current_val]
         if not filtered:
-            filtered = candidates  # fallback if all candidates match current
+            filtered = candidates
         return self.random.choice(filtered)
 
     def _kb_constant_candidates(self) -> list[int]:
@@ -352,15 +372,15 @@ class MCMCSampler:
 
         choices = []
         if self.flags.replace_entire_op and live_op_indices:
-            choices.append(('replace_entire', 3))
+            choices.append(('replace_entire', 2))
         if self.flags.replace_operand and live_op_indices:
-            choices.append(('replace_operand', 7))
+            choices.append(('replace_operand', 2))
         if self.flags.rewire_make_op:
-            choices.append(('rewire_make', 1))
-        if self.flags.perturb_constant:
-            choices.append(('perturb_const', 1))
+            choices.append(('rewire_make', 2))
+        if self.flags.perturb_constant and self._has_useful_perturbation():
+            choices.append(('perturb_const', 2))
         if self.flags.replace_op_window and len(live_op_indices) >= 2:
-            choices.append(('window', 1))
+            choices.append(('window', 2))
         if not choices:
             return self
 
@@ -401,6 +421,7 @@ def setup_mcmc(
     program_length: int,
     num_steps: int,
     cond_length: int,
+    bw: int = 4
 ) -> tuple[list[MCMCSampler], list[FuncOp], tuple[range, range, range]]:
     """
     A mcmc sampler use one of 3 modes: sound & precise, precise, condition
@@ -443,6 +464,7 @@ def setup_mcmc(
                 program_length,
                 num_steps,
                 random_init_program=True,
+                bw=bw
             )
         elif i in p_range:
             spl = MCMCSampler(
@@ -454,6 +476,7 @@ def setup_mcmc(
                 program_length,
                 num_steps,
                 random_init_program=True,
+                bw=bw
             )
         else:
             spl = MCMCSampler(
@@ -464,6 +487,7 @@ def setup_mcmc(
                 num_steps,
                 random_init_program=True,
                 is_cond=True,
+                bw=bw
             )
 
         mcmc_samplers.append(spl)
