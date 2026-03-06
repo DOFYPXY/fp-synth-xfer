@@ -6,8 +6,8 @@ from xdsl.dialects.func import FuncOp, ReturnOp
 from xdsl.dialects.smt import BoolType, ConstantBoolOp
 from xdsl.ir import Operation, SSAValue
 from xdsl.transforms.canonicalize import CanonicalizePass
-from xdsl_smt.dialects.smt_dialect import CheckSatOp, DefineFunOp
 from xdsl_smt.dialects.smt_bitvector_dialect import ConstantOp
+from xdsl_smt.dialects.smt_dialect import CheckSatOp, DefineFunOp
 from xdsl_smt.dialects.transfer import (
     AbstractValueType,
     GetOp,
@@ -47,13 +47,16 @@ from xdsl_smt.utils.transfer_function_util import (
 )
 from z3 import ModelRef, Solver, parse_smt2_string, sat, unknown
 
-from .fp_semantics import FloatingPointAbsTypeSemantics, FloatingPointTypeSemantics, fp_semantics
 from synth_xfer.dialects.fp import FloatType, FPAbsValueType
 
+from .fp_semantics import (
+    FloatingPointAbsTypeSemantics,
+    FloatingPointTypeSemantics,
+    fp_semantics,
+)
+
 try:
-    from cvc5 import InputParser, InputLanguage
-    from cvc5 import Solver as Cvc5Solver
-    from cvc5 import SymbolManager
+    from cvc5 import InputLanguage, InputParser, Solver as Cvc5Solver, SymbolManager
 except ImportError:
     pass
 
@@ -84,9 +87,7 @@ def _verify_pattern(
     return _check_sat_z3(smt2_string, timeout)
 
 
-def _check_sat_z3(
-    smt2_string: str, timeout: int
-) -> tuple[bool | None, ModelRef | None]:
+def _check_sat_z3(smt2_string: str, timeout: int) -> tuple[bool | None, ModelRef | None]:
     s = Solver()
     s.set(timeout=timeout * 1000)
     s.add(parse_smt2_string(smt2_string))
@@ -433,13 +434,11 @@ def _fp_forward_soundness_check(
                     effect.result,
                 )
             )
-            abs_domain_constraints_ops += (
-                call_function_and_assert_result_with_effect(
-                    domain_constraint,
-                    [abs_arg],
-                    constant_bv_1,
-                    effect.result,
-                )
+            abs_domain_constraints_ops += call_function_and_assert_result_with_effect(
+                domain_constraint,
+                [abs_arg],
+                constant_bv_1,
+                effect.result,
             )
 
     abs_arg_constraints_ops: list[Operation] = []
@@ -460,13 +459,11 @@ def _fp_forward_soundness_check(
         concrete_func, crt_args, effect.result
     )
 
-    abs_result_not_include_crt_result_ops = (
-        call_function_and_assert_result_with_effect(
-            instance_constraint,
-            [call_abs_func_first_op.res, call_crt_func_first_op.res],
-            constant_bv_0,
-            effect.result,
-        )
+    abs_result_not_include_crt_result_ops = call_function_and_assert_result_with_effect(
+        instance_constraint,
+        [call_abs_func_first_op.res, call_crt_func_first_op.res],
+        constant_bv_0,
+        effect.result,
     )
 
     return (
@@ -574,7 +571,11 @@ def verify_fp_transfer_function(
     _FP_DUMMY_WIDTH = 16
 
     func_name_to_smt_func, transfer_function_obj, pre_lowered = _build_fp_module(
-        transfer_function, concrete_func, helper_funcs, _FP_DUMMY_WIDTH, ctx,
+        transfer_function,
+        concrete_func,
+        helper_funcs,
+        _FP_DUMMY_WIDTH,
+        ctx,
     )
 
     # FP uses FPAbsValueType instead of AbstractValueType
@@ -592,7 +593,10 @@ def verify_fp_transfer_function(
         concrete_func_name,
         func_name_to_smt_func.get("abs_op_constraint"),
         func_name_to_smt_func.get("op_constraint"),
-        None, None, None, None,
+        None,
+        None,
+        None,
+        None,
         func_name_to_smt_func[func_name],
         func_name_to_smt_func[concrete_func_name],
     )
@@ -616,7 +620,9 @@ def verify_fp_transfer_function(
     query_module.body.block.add_ops(added_ops)
     FunctionCallInline(True, {}).apply(ctx, query_module)
     return _verify_pattern(
-        ctx, query_module, timeout,
+        ctx,
+        query_module,
+        timeout,
         solver=solver,
         solver_options={"fp-exp": "true"},
     )

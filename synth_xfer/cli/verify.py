@@ -12,7 +12,10 @@ from synth_xfer._util.parse_mlir import (
     get_helper_funcs,
     parse_mlir_mod,
 )
-from synth_xfer._util.verifier import verify_fp_transfer_function, verify_transfer_function
+from synth_xfer._util.verifier import (
+    verify_fp_transfer_function,
+    verify_transfer_function,
+)
 from synth_xfer.cli.args import int_list
 from synth_xfer.cli.eval_final import resolve_xfer_name
 
@@ -41,7 +44,9 @@ def verify_function(
         )
 
     assert bw is not None, "bw is required for bitvector domains"
-    return verify_transfer_function(func, helper_funcs.crt_func, helpers, bw, timeout, solver=solver)
+    return verify_transfer_function(
+        func, helper_funcs.crt_func, helpers, bw, timeout, solver=solver
+    )
 
 
 def _register_parser() -> Namespace:
@@ -65,7 +70,9 @@ def _register_parser() -> Namespace:
     p.add_argument("--op", type=Path, required=True, help="Concrete op")
     p.add_argument("--xfer-file", type=Path, required=True, help="Transformer file")
     p.add_argument("--xfer-name", type=str, help="Transformer to verify")
-    p.add_argument("--timeout", type=int, default=30, help="Solver timeout (per bitwidth)")
+    p.add_argument(
+        "--timeout", type=int, default=30, help="Solver timeout (per bitwidth)"
+    )
     p.add_argument(
         "--solver",
         type=str,
@@ -90,7 +97,11 @@ def main() -> None:
     if domain == AbstractDomain.FPRange:
         start_time = perf_counter()
         is_sound, model = verify_function(
-            xfer_fn, list(xfer_fns.values()), helper_funcs, args.timeout, domain,
+            xfer_fn,
+            list(xfer_fns.values()),
+            helper_funcs,
+            args.timeout,
+            domain,
             solver=args.solver,
         )
         run_time = perf_counter() - start_time
@@ -101,8 +112,13 @@ def main() -> None:
         for bw in args.bw:
             start_time = perf_counter()
             is_sound, model = verify_function(
-                xfer_fn, list(xfer_fns.values()), helper_funcs, args.timeout, domain,
-                solver=args.solver, bw=bw,
+                xfer_fn,
+                list(xfer_fns.values()),
+                helper_funcs,
+                args.timeout,
+                domain,
+                solver=args.solver,
+                bw=bw,
             )
             run_time = perf_counter() - start_time
             _print_result(bw, is_sound, model, run_time)
