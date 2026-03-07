@@ -94,6 +94,7 @@ def run(
     num_unsound_candidates: int,
     optimize: bool,
     sampler: Sampler,
+    mutation_flags: set[str]
 ) -> EvalResult:
     logger = get_logger()
     jit = Jit()
@@ -163,7 +164,8 @@ def run(
             current_prog_len,
             current_num_steps,
             condition_length,
-            bw=lbw[0]
+            bw=lbw[0],
+            mutation_flags=mutation_flags
         )
 
         solution_set = synthesize_one_iteration(
@@ -236,6 +238,7 @@ def main() -> None:
 
     domain = AbstractDomain[args.domain]
     op_path = Path(args.transfer_function)
+    mutation_flags = set(args.mutation_flags.split(","))
 
     if args.output is None:
         outputs_folder = Path("outputs", f"{domain}_{op_path.stem}")
@@ -272,4 +275,5 @@ def main() -> None:
         num_unsound_candidates=args.num_unsound_candidates,
         optimize=args.optimize,
         sampler=sampler,
+        mutation_flags=mutation_flags
     )

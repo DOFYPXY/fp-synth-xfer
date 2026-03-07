@@ -35,14 +35,12 @@ from synth_xfer._util.synth_context import (
 from synth_xfer._util.domain import AbstractDomain
 from dataclasses import dataclass
 
-# We add this dataclass to test mutations in isolations
-# TODO: Remove this after testing 
 @dataclass
 class MutationFlags:
     replace_entire_op: bool = True # Exists 
     replace_operand: bool = True # Exists
-    rewire_make_op: bool = True # New
-    perturb_constant: bool = True # New
+    rewire_make_op: bool = False # New
+    perturb_constant: bool = False # New
     replace_op_window: bool = False # New
     
 class MCMCSampler:
@@ -73,7 +71,7 @@ class MCMCSampler:
     ):
         self.bw = bw
         self.is_cond = is_cond
-        self.flags = flags or MutationFlags() 
+        self.flags = flags
         if is_cond:
             cond_type = FunctionType.from_lists(
                 func.function_type.inputs,  # pyright: ignore [reportArgumentType]
@@ -239,24 +237,22 @@ class MCMCSampler:
         if len(live_ops) < 2:
             return
 
-        # Pick window size 2 or 3
         window_size = min(
             self.random.randint(2, 3),
             len(live_ops)
         )
-
-        # Pick a random starting position in live ops
         start = self.random.randint(0, len(live_ops) - window_size)
-        window = live_ops[start: start + window_size]
+        window_indices = [idx for _, idx in live_ops[start: start + window_size]]
 
-        old_ops = [op for op, _ in window]
-        new_ops = []
+        # Save a clone of the entire function as backup
+        backup_func = self.current.func.clone()
 
-        block = self.current.func.body.block
-
-        for op, idx in window:
+        for orig_idx in window_indices:
+            ops = self.current.ops
+            op = ops[orig_idx]
+            
             valid_operands = {
-                ty: self.current.get_valid_operands(idx, ty)
+                ty: self.current.get_valid_operands(orig_idx, ty)
                 for ty in [INT_T, BOOL_T]
             }
             new_op = None
@@ -264,16 +260,18 @@ class MCMCSampler:
                 new_op = self.context.get_random_op(
                     get_ret_type(op), valid_operands
                 )
-            new_ops.append(new_op)
-            # Insert new op and rewire before moving to next
+            
+            block = self.current.func.body.block
             block.insert_op_before(new_op, op)
             if len(op.results) > 0 and len(new_op.results) > 0:
                 op.results[0].replace_by(new_op.results[0])
             block.detach_op(op)
+            op.erase()
 
         if history:
-            self.current.old_ops = old_ops
-            self.current.new_ops = new_ops
+            self.current.old_ops = []     
+            self.current.new_ops = []
+            self.current._backup_func = backup_func
             
     def construct_init_program(self, _func: FuncOp, length: int):
         func = _func.clone()
@@ -316,14 +314,11 @@ class MCMCSampler:
             # Part III: Main Body
             last_int_op = block.last_op
             for i in range(length):
-                if i % 4 == 0:
+                if i % 6 == 0:
                     nop_bool = CmpOp(tmp_int_ssavalue, tmp_int_ssavalue, 0)
                     block.add_op(nop_bool)
-                elif i % 4 == 1:
-                    int_nop = AddOp(tmp_int_ssavalue, tmp_int_ssavalue)
-                    block.add_op(int_nop)
-                elif i % 4 == 2:
-                    last_int_op = AndOp(tmp_int_ssavalue, tmp_int_ssavalue)
+                elif i % 3 == 0:
+                    last_int_op = AddOp(tmp_int_ssavalue, tmp_int_ssavalue)
                     block.add_op(last_int_op)
                 else:
                     last_int_op = AndOp(tmp_int_ssavalue, tmp_int_ssavalue)
@@ -421,7 +416,8 @@ def setup_mcmc(
     program_length: int,
     num_steps: int,
     cond_length: int,
-    bw: int = 4
+    bw: int = 4,
+    mutation_flags: set[str] | None = None
 ) -> tuple[list[MCMCSampler], list[FuncOp], tuple[range, range, range]]:
     """
     A mcmc sampler use one of 3 modes: sound & precise, precise, condition
@@ -451,7 +447,15 @@ def setup_mcmc(
         for i, item in enumerate(precise_set):
             for _ in range(base_count + (1 if i < remainder else 0)):
                 prec_set_after_distribute.append(item.clone())
-
+                
+    mutation_flags_obj = MutationFlags(
+        replace_entire_op='replace_entire_op' in mutation_flags,
+        replace_operand='replace_operand' in mutation_flags,
+        rewire_make_op='rewire_make_op' in mutation_flags,
+        perturb_constant='perturb_constant' in mutation_flags,
+        replace_op_window='replace_op_window' in mutation_flags,
+    )
+    
     mcmc_samplers: list[MCMCSampler] = []
     for i in range(num_mcmc):
         if i in sp_range:
@@ -464,7 +468,8 @@ def setup_mcmc(
                 program_length,
                 num_steps,
                 random_init_program=True,
-                bw=bw
+                bw=bw,
+                flags=mutation_flags_obj
             )
         elif i in p_range:
             spl = MCMCSampler(
@@ -476,7 +481,8 @@ def setup_mcmc(
                 program_length,
                 num_steps,
                 random_init_program=True,
-                bw=bw
+                bw=bw,
+                flags=mutation_flags_obj
             )
         else:
             spl = MCMCSampler(
@@ -487,7 +493,8 @@ def setup_mcmc(
                 num_steps,
                 random_init_program=True,
                 is_cond=True,
-                bw=bw
+                bw=bw,
+                flags=mutation_flags_obj
             )
 
         mcmc_samplers.append(spl)
