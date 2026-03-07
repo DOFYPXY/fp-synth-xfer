@@ -1,3 +1,4 @@
+#!/bin/bash
 SEED=2333
 
 DOMAIN="KnownBits"
@@ -9,7 +10,7 @@ HBW="32,5000,10000 64,5000,10000"
 VBW="4,8,16,32,64"
 MUTATION_FLAGS="replace_entire_op,replace_operand"
 
-COMMON_ARGS="--domain $DOMAIN --num-iters $NUM_ITERS --num-steps $NUM_STEPS --num-mcmc $NUM_MCMC --mbw $MBW --hbw $HBW --vbw $VBW --random-seed $SEED  --mutation-flags $MUTATION_FLAGS "
+COMMON_ARGS="--domain $DOMAIN --num-iters $NUM_ITERS --num-steps $NUM_STEPS --num-mcmc $NUM_MCMC --mbw $MBW --hbw $HBW --vbw $VBW --random-seed $SEED  --mutation-flags $MUTATION_FLAGS"
 
 OUTDIR="outputs/parallel_runs_baseline"
 
