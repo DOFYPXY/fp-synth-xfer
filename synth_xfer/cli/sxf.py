@@ -99,6 +99,16 @@ def run(
     jit = Jit()
     dsl_ops: DslOpSet | None = load_dsl_ops(dsl_ops_path) if dsl_ops_path else None
 
+    if domain == AbstractDomain.FPRange:
+        assert len(lbw) == 0, "LBW not supported for FPRange domain"
+        if mbw:
+            assert len(mbw) == 1 and mbw[0][0] == 16 and len(hbw) == 0, (
+                "Only MBW of 16 is supported for FPRange domain"
+            )
+        if hbw:
+            assert len(hbw) == 1 and hbw[0][0] == 16 and len(mbw) == 0, (
+                "Only HBW of 16 is supported for FPRange domain"
+            )
     EvalResult.init_bw_settings(
         set(lbw), set([t[0] for t in mbw]), set([t[0] for t in hbw])
     )
@@ -163,7 +173,8 @@ def run(
             current_prog_len,
             current_num_steps,
             condition_length,
-            bw=lbw[0]
+            # Xuanyu: fix this hardcoded bitwidth later
+            bw=16,
         )
 
         solution_set = synthesize_one_iteration(

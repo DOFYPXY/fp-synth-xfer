@@ -27,7 +27,7 @@ class MutationProgram:
         self.old_op = None
         self.new_op = None
         self.old_ops = None
-        self.new_ops = None        
+        self.new_ops = None
 
     @property
     def ops(self):
