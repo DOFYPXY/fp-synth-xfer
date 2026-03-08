@@ -94,6 +94,7 @@ def run(
     num_unsound_candidates: int,
     optimize: bool,
     sampler: Sampler,
+    mutation_flags: set[str]
 ) -> EvalResult:
     logger = get_logger()
     jit = Jit()
@@ -173,8 +174,9 @@ def run(
             current_prog_len,
             current_num_steps,
             condition_length,
-            # Xuanyu: fix this hardcoded bitwidth later
-            bw=16,
+            # Xuanyu: I don't exactly know the purpose of passing bw here so I hardcoded this as a random number for now. Since we hardcode everything to be fp16 in FPRange case, this parameter should not be used when mutate FPRange transformers.
+            bw=233,
+            mutation_flags=mutation_flags
         )
 
         solution_set = synthesize_one_iteration(
@@ -247,6 +249,7 @@ def main() -> None:
 
     domain = AbstractDomain[args.domain]
     op_path = Path(args.transfer_function)
+    mutation_flags = set(args.mutation_flags.split(","))
 
     if args.output is None:
         outputs_folder = Path("outputs", f"{domain}_{op_path.stem}")
@@ -283,4 +286,5 @@ def main() -> None:
         num_unsound_candidates=args.num_unsound_candidates,
         optimize=args.optimize,
         sampler=sampler,
+        mutation_flags=mutation_flags
     )
