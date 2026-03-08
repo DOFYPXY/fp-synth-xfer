@@ -174,7 +174,7 @@ def run(
             current_prog_len,
             current_num_steps,
             condition_length,
-            # Xuanyu: I don't exactly know the purpose of passing bw here so I hardcoded this as a random number for now. Since we hardcode everything to be fp16 in FPRange case, this parameter should not be used when mutate FPRange transformers.
+            # Xuanyu: I don't exactly know the purpose of passing bw here so I set this as a random number for now. Since we hardcode everything to be fp16 in FPRange case, this parameter should not be used when mutate FPRange transformers.
             bw=233,
             mutation_flags=mutation_flags
         )
