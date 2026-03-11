@@ -100,6 +100,16 @@ def run(
     jit = Jit()
     dsl_ops: DslOpSet | None = load_dsl_ops(dsl_ops_path) if dsl_ops_path else None
 
+    if domain == AbstractDomain.FPRange:
+        assert len(lbw) == 0, "LBW not supported for FPRange domain"
+        if mbw:
+            assert len(mbw) == 1 and mbw[0][0] == 16 and len(hbw) == 0, (
+                "Only MBW of 16 is supported for FPRange domain"
+            )
+        if hbw:
+            assert len(hbw) == 1 and hbw[0][0] == 16 and len(mbw) == 0, (
+                "Only HBW of 16 is supported for FPRange domain"
+            )
     EvalResult.init_bw_settings(
         set(lbw), set([t[0] for t in mbw]), set([t[0] for t in hbw])
     )
@@ -131,8 +141,12 @@ def run(
     run_time = perf_counter() - start_time
     logger.perf(f"Init Eval took {run_time:.4f}s")
 
-    init_exact = init_cmp_res.get_exact_prop() * 100
-    s = f"Top Solution | Exact {init_exact:.4f}% |"
+    init_norm = init_cmp_res.get_sound_dist()
+    init_exact_log = ""
+    if init_cmp_res.all_low_med_cases > 0:
+        init_exact = init_cmp_res.get_exact_prop() * 100
+        init_exact_log = f"Exact {init_exact:.4f}% | "
+    s = f"Top Solution | {init_exact_log}Norm {init_norm:.4f} |"
     logger.info(s)
     print(s)
 
@@ -164,7 +178,8 @@ def run(
             current_prog_len,
             current_num_steps,
             condition_length,
-            bw=lbw[0],
+            # Xuanyu: I don't exactly know the purpose of passing bw here so I set this as a random number for now. Since we hardcode everything to be fp16 in FPRange case, this parameter should not be used when mutate FPRange transformers.
+            bw=233,
             mutation_flags=mutation_flags
         )
 
@@ -197,9 +212,13 @@ def run(
         )
 
         iter_time = perf_counter() - iter_start
-        final_exact = final_cmp_res.get_exact_prop() * 100
+        final_norm = final_cmp_res.get_sound_dist()
+        final_exact_log = ""
+        if final_cmp_res.all_low_med_cases > 0:
+            final_exact = final_cmp_res.get_exact_prop() * 100
+            final_exact_log = f"Exact {final_exact:.4f}% | "
         print(
-            f"Iteration {ith_iter}  | Exact {final_exact:.4f}% | {solution_set.solutions_size} solutions | {iter_time:.4f}s |"
+            f"Iteration {ith_iter}  | {final_exact_log}Norm {final_norm:.4f} | {solution_set.solutions_size} solutions | {iter_time:.4f}s |"
         )
 
         logger.info(
@@ -225,9 +244,12 @@ def run(
     sol_to_eval = {bw: (to_eval[bw], [sol_ptrs[bw]], []) for bw in all_bws}
     solution_result = eval_transfer_func(sol_to_eval)[0]
 
-    solution_exact = solution_result.get_exact_prop() * 100
+    solution_exact_log = ""
+    if solution_result.all_low_med_cases > 0:
+        solution_exact = solution_result.get_exact_prop() * 100
+        solution_exact_log = f"Exact {solution_exact:.4f}% | "
     print(
-        f"Final Soln   | Exact {solution_exact:.4f}% | {solution_set.solutions_size} solutions |"
+        f"Final Soln   | {solution_exact_log}{solution_set.solutions_size} solutions |"
     )
 
     return solution_result
