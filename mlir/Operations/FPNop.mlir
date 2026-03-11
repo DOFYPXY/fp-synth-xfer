@@ -2,5 +2,5 @@
   "func.func"() ({
   ^bb0(%arg0: !fp.float):
     "func.return"(%arg0) : (!fp.float) -> ()
-  }) {function_type = (!fp.float,!fp.float) -> !fp.float, sym_name = "concrete_op"} : () -> ()
+  }) {function_type = (!fp.float) -> !fp.float, sym_name = "concrete_op"} : () -> ()
 }): () -> ()
