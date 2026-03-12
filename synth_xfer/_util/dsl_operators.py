@@ -39,6 +39,20 @@ from xdsl_smt.dialects.transfer import (
     XorOp,
 )
 
+from synth_xfer.dialects.fp import (
+    FPAbsOp,
+    FPAddOp,
+    FPCmpOp,
+    FPDivOp,
+    FPIsNanOp,
+    FPMaxOp,
+    FPMinOp,
+    FPMulOp,
+    FPNegOp,
+    FPSqrtOp,
+    FPSubOp,
+)
+
 INT_T = "int"
 BOOL_T = "bool"
 
@@ -111,7 +125,6 @@ def load_dsl_ops(path: Path) -> DslOpSet:
 
 
 def get_operand_kinds(op_type: type[Operation]) -> tuple[str, ...]:
-    """Infer operand kinds (int or bool) from the op definition."""
     if op_type == SelectOp:
         return (BOOL_T, INT_T, INT_T)
     if op_type in {arith.AndIOp, arith.OrIOp, arith.XOrIOp}:
@@ -120,11 +133,13 @@ def get_operand_kinds(op_type: type[Operation]) -> tuple[str, ...]:
         return (INT_T, INT_T)
     if issubclass(op_type, UnaryOp):
         return (INT_T,)
+    if op_type in {FPAbsOp, FPNegOp, FPSqrtOp, FPIsNanOp}:
+        return (INT_T,)
     return (INT_T, INT_T)
 
 
 def get_result_kind(op_type: type[Operation]) -> str:
-    if op_type in {arith.AndIOp, arith.OrIOp, arith.XOrIOp, CmpOp}:
+    if op_type in {arith.AndIOp, arith.OrIOp, arith.XOrIOp, CmpOp, FPCmpOp, FPIsNanOp}:
         return BOOL_T
     return INT_T
 
@@ -276,3 +291,26 @@ int_prior_bias: dict[type[Operation], int] = {
     SetSignBitOp: 0,
     ClearSignBitOp: 0,
 }
+
+FP_FLOAT_T = "fp_float"  # FloatType operands
+FP_BOOL_T = "fp_bool"  # i1 operands
+
+fp_float_ops: list[type[Operation]] = [
+    FPAddOp,
+    FPSubOp,
+    FPMulOp,
+    FPDivOp,
+    FPMaxOp,
+    FPMinOp,
+    FPAbsOp,
+    FPNegOp,
+]
+
+fp_bool_ops: list[type[Operation]] = [
+    FPCmpOp,
+    FPIsNanOp,
+]
+
+FP_DSL_OPS: DslOpSet = {INT_T: fp_float_ops, BOOL_T: fp_bool_ops}
+
+# At the top of dsl_operators.py, add:

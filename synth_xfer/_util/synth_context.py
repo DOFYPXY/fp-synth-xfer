@@ -1,7 +1,7 @@
 from typing import Callable, Generic, TypeVar
 
 import xdsl.dialects.arith as arith
-from xdsl.dialects.builtin import IntegerAttr, i1
+from xdsl.dialects.builtin import IntegerAttr, IntegerType, i1
 from xdsl.dialects.func import FuncOp, ReturnOp
 from xdsl.ir import Operation, SSAValue
 from xdsl_smt.dialects.transfer import (
@@ -38,6 +38,7 @@ from xdsl_smt.dialects.transfer import (
     XorOp,
 )
 
+from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.dsl_operators import (
     BOOL_T,
     DEFAULT_DSL_OPS,
@@ -52,7 +53,14 @@ from synth_xfer._util.dsl_operators import (
     make_uniform_weights,
 )
 from synth_xfer._util.random import Random
-from synth_xfer._util.domain import AbstractDomain
+from synth_xfer.dialects.fp import (
+    FPCmpOp as FPCmpOpType,
+    FPConstantOp,
+    FPGetOp,
+    FPIsNanOp,
+    FPMakeOp,
+    UnaryOp as FPUnaryOp,
+)
 
 T = TypeVar("T")
 
@@ -235,6 +243,8 @@ idempotent_operations: set[type[Operation]] = {
     arith.AndIOp,
     arith.OrIOp,
     arith.XOrIOp,
+    # fp ops
+    FPCmpOpType,
 }
 """
 Idempotent property means we should not use the same operand for both operand.
@@ -244,6 +254,9 @@ Idempotent property means we should not use the same operand for both operand.
 def get_ret_type(op: Operation) -> str:
     if isinstance(op, arith.ConstantOp):
         if op.results and op.results[0].type == i1:
+            return BOOL_T
+    if isinstance(op, FPGetOp):
+        if op.results and isinstance(op.results[0].type, IntegerType):
             return BOOL_T
     return get_result_kind(type(op))
 
@@ -261,7 +274,6 @@ def is_of_type(op: Operation, ty: str) -> bool:
 
 
 def not_in_main_body(op: Operation):
-    # filter out operations not belong to main body
     return (
         isinstance(op, Constant)
         or isinstance(op, arith.ConstantOp)
@@ -270,12 +282,16 @@ def not_in_main_body(op: Operation):
         or isinstance(op, GetOp)
         or isinstance(op, MakeOp)
         or isinstance(op, ReturnOp)
+        # FP scaffolding
+        or isinstance(op, FPGetOp)
+        or isinstance(op, FPMakeOp)
+        or isinstance(op, FPConstantOp)
     )
 
 
 class SynthesizerContext:
     random: Random
-    domain: AbstractDomain | None 
+    domain: AbstractDomain | None
     cmp_flags: list[int]
     dsl_ops: dict[str, Collection[type[Operation]]]
     op_weights: dict[str, dict[type[Operation], int]]
@@ -289,7 +305,7 @@ class SynthesizerContext:
         random: Random,
         dsl_ops: DslOpSet | None = None,
         weighted: bool = False,
-        domain: AbstractDomain | None = None, 
+        domain: AbstractDomain | None = None,
     ):
         self.random = random
         self.domain = domain
@@ -371,9 +387,7 @@ class SynthesizerContext:
             val2 = self.select_operand(vals2, constraint2)
         return val1, val2
 
-    def build_i1_op(
-        self, result_type: type[Operation], operands_vals: tuple[list[SSAValue], ...]
-    ) -> Operation | None:
+    def build_i1_op(self, result_type, operands_vals):
         if result_type == CmpOp:
             val1, val2 = self.select_two_operand(
                 operands_vals[0],
@@ -383,11 +397,39 @@ class SynthesizerContext:
             )
             if val1 is None or val2 is None:
                 return None
-            return CmpOp(
-                val1,
-                val2,
-                self.random.choice(self.cmp_flags),
+            return CmpOp(val1, val2, self.random.choice(self.cmp_flags))
+
+        if result_type == FPCmpOpType:
+            val1, val2 = self.select_two_operand(
+                operands_vals[0],
+                operands_vals[1],
+                self.get_constraint(result_type),
+                is_idempotent=self.is_idempotent(result_type),
             )
+            if val1 is None or val2 is None:
+                return None
+            fp_predicates = [
+                "oeq",
+                "one",
+                "olt",
+                "ole",
+                "ogt",
+                "oge",
+                "ueq",
+                "une",
+                "ult",
+                "ule",
+                "ugt",
+                "uge",
+            ]
+            return FPCmpOpType(val1, val2, self.random.choice(fp_predicates))
+
+        if result_type == FPIsNanOp:
+            val = self.select_operand(operands_vals[0], self.get_constraint(result_type))
+            if val is None:
+                return None
+            return FPIsNanOp(val)
+
         assert result_type is not None
         val1, val2 = self.select_two_operand(
             operands_vals[0],
@@ -428,6 +470,11 @@ class SynthesizerContext:
                 return None
             return SelectOp(cond, true_val, false_val)
         elif issubclass(result_type, UnaryOp):
+            val = self.select_operand(operands_vals[0], self.get_constraint(result_type))
+            if val is None:
+                return None
+            return result_type(val)
+        elif issubclass(result_type, FPUnaryOp):
             val = self.select_operand(operands_vals[0], self.get_constraint(result_type))
             if val is None:
                 return None

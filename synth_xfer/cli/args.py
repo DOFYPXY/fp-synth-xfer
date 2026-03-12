@@ -317,12 +317,12 @@ def build_parser(prog: str) -> Namespace:
         default=15,
     )
     p.add_argument("-q", "--quiet", action="store_true")
-    
+
     p.add_argument(
-        "--mutation-flags", 
-        type=str, 
-        default="replace_entire_op,replace_operand", 
-        help="Comma-separated list of mutation flags to enable. Available flags: replace_entire_op, replace_operand, rewire_make_op, perturb_constant, replace_op_window"
+        "--mutation-flags",
+        type=str,
+        default="replace_entire_op,replace_operand,rewire_make_op",
+        help="Comma-separated list of mutation flags to enable. Available flags: replace_entire_op, replace_operand, rewire_make_op, perturb_constant, replace_op_window",
     )
 
     return p.parse_args()
