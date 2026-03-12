@@ -3,6 +3,7 @@ from xdsl.ir import Operation, SSAValue
 from xdsl_smt.dialects.transfer import MakeOp
 
 from synth_xfer._util.synth_context import is_of_type, not_in_main_body
+from synth_xfer.dialects.fp import FPMakeOp
 
 
 class MutationProgram:
@@ -28,7 +29,7 @@ class MutationProgram:
         self.new_op = None
         self.old_ops = None
         self.new_ops = None
-        self._backup_func = None        
+        self._backup_func = None
 
     @property
     def ops(self):
@@ -45,7 +46,7 @@ class MutationProgram:
 
         assert isinstance(self.ops[-1], ReturnOp)
 
-        if isinstance(self.ops[-2], MakeOp):  # regular function
+        if isinstance(self.ops[-2], (MakeOp, FPMakeOp)):  # regular function
             last_make_op = self.ops[-2]
             for operand in last_make_op.operands:
                 assert isinstance(operand.owner, Operation)
