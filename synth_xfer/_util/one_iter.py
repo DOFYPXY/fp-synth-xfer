@@ -5,6 +5,7 @@ from xdsl.dialects.func import FuncOp
 
 from synth_xfer._util.cond_func import FunctionWithCondition
 from synth_xfer._util.cost_model import decide
+from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.eval_result import EvalResult
 from synth_xfer._util.log import get_logger
 from synth_xfer._util.mcmc_sampler import MCMCSampler
@@ -58,6 +59,7 @@ def synthesize_one_iteration(
     prec_set: list[FuncOp],
     lbw: list[int],
     vbw: list[int],
+    domain: AbstractDomain.KnownBits,
 ) -> SolutionSet:
     "Given ith_iter, performs num_steps mcmc sampling"
 
@@ -195,6 +197,7 @@ def synthesize_one_iteration(
         candidates_c,
         helper_funcs,
         num_unsound_candidates,
+        domain=domain,
     )
     verif_time = perf_counter() - verif_start_time
     iter_time = perf_counter() - iter_start_time
