@@ -6,6 +6,7 @@ from xdsl.dialects.func import CallOp, FuncOp, ReturnOp
 from xdsl_smt.dialects.transfer import AbstractValueType, GetOp, MakeOp, SelectOp
 
 from synth_xfer._util.dce import dce
+from synth_xfer.dialects.fp import FloatType, FPAbsValueType
 
 
 @dataclass
@@ -21,6 +22,14 @@ class FunctionWithCondition:
     This func_name is used in generation the whole function.
     """
     func_name: str = field(init=False)
+
+    @property
+    def is_fprange(self) -> bool:
+        # check if any of the arguments is FloatType of FPAbsValueType
+        for arg in self.func.function_type.inputs.data:
+            if isinstance(arg, FloatType) or isinstance(arg, FPAbsValueType):
+                return True
+        return False
 
     def set_func_name(self, new_func_name: str):
         self.func_name = new_func_name
@@ -108,5 +117,5 @@ class FunctionWithCondition:
     def lower(self, lowerer: Callable[[FuncOp], dict]) -> dict[int, str]:
         lowerer(self.func)
         lowerer(self.cond) if self.cond else None
-        lowered_fns = lowerer(self.get_function(), shim=True)  # type: ignore
+        lowered_fns = lowerer(self.get_function(), shim=(not self.is_fprange))  # type: ignore
         return {bw: x.name for bw, x in lowered_fns.items()}

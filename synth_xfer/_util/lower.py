@@ -215,6 +215,9 @@ class LowerToLLVM:
         elif self.is_constraint(mlir_fn):
             return self.shim_constraint(mlir_fn, llvm_fn, bw)
         elif self.is_transfer_fn(mlir_fn):
+            # Route FPRange transfer functions to FP-specific shim
+            if any(isinstance(a.type, FPAbsValueType) for a in mlir_fn.args):
+                return self.shim_xfer_fp(mlir_fn, llvm_fn, bw)
             return self.shim_xfer(mlir_fn, llvm_fn, bw)
         else:
             raise ValueError(
@@ -327,6 +330,25 @@ class LowerToLLVM:
         r = b.insert_value(r, r1, 1)
         b.ret(r)
 
+        return shim_fn
+
+    def shim_xfer_fp(self, mlir_fn: FuncOp, old_fn: ir.Function, bw: int) -> ir.Function:
+        """Shim for FPRange transfer functions.
+        ABI: each FPAbsValueType arg/ret is a single uint64
+        Layout: lo(16) | hi(16) | has_nan(8) | padding(24)
+        The underlying function takes/returns uint64 directly, so no packing needed —
+        just call it and return the result.
+        """
+        n_args = len(old_fn.function_type.args)
+        i64 = ir.IntType(64)
+        fn_name = f"{old_fn.name}_shim"
+        shim_ty = ir.FunctionType(i64, [i64 for _ in range(n_args)])
+        shim_fn = ir.Function(self.llvm_mod, shim_ty, name=fn_name)
+        shim_fn = self.add_attrs(shim_fn)
+        b = ir.IRBuilder(shim_fn.append_basic_block(name="entry"))
+        # The underlying function already uses uint64 ABI — just forward args directly
+        result = b.call(old_fn, list(shim_fn.args))
+        b.ret(result)
         return shim_fn
 
 
@@ -617,58 +639,62 @@ class _LowerFuncToLLVM:
             sqrt_fn = self.llvm_mod.globals[fnc_name]
         self.ssa_map[op.results[0]] = self.b.call(sqrt_fn, [operand], name=res_name)
 
+    # Sairam: We use "Cascade Lake" CPUs on the server that do not support FP16 instructions
+    # So, promoting FP16 to FP32, applying the intrinsic, and then demoting it back works
+    # However, llvm.maximum/minimum are not suspported on these CPUs even for f32
     @add_op.register
     def _(self, op: FPMaxOp) -> None:
         res_name = self.result_name(op)
         lhs, rhs = self.operands(op)
-        # Use LLVM's maxnum intrinsic
-        fnc_name = "llvm.maxnum.f16"
+        f32 = ir.FloatType()
+        half = ir.HalfType()
+        fnc_name = "llvm.maxnum.f32"
         if fnc_name not in self.llvm_mod.globals:
             maxnum_fn = ir.Function(
-                self.llvm_mod,
-                ir.FunctionType(ir.HalfType(), [ir.HalfType(), ir.HalfType()]),
-                name=fnc_name,
+                self.llvm_mod, ir.FunctionType(f32, [f32, f32]), name=fnc_name
             )
         else:
             maxnum_fn = self.llvm_mod.globals[fnc_name]
-        self.ssa_map[op.results[0]] = self.b.call(maxnum_fn, [lhs, rhs], name=res_name)
+        lhs_f32 = self.b.fpext(lhs, f32)
+        rhs_f32 = self.b.fpext(rhs, f32)
+        result_f32 = self.b.call(maxnum_fn, [lhs_f32, rhs_f32])
+        self.ssa_map[op.results[0]] = self.b.fptrunc(result_f32, half, name=res_name)
 
     @add_op.register
     def _(self, op: FPMinOp) -> None:
         res_name = self.result_name(op)
         lhs, rhs = self.operands(op)
-        # Use LLVM's minnum intrinsic
-        fnc_name = "llvm.minnum.f16"
+        f32 = ir.FloatType()
+        half = ir.HalfType()
+        fnc_name = "llvm.minnum.f32"
         if fnc_name not in self.llvm_mod.globals:
             minnum_fn = ir.Function(
-                self.llvm_mod,
-                ir.FunctionType(ir.HalfType(), [ir.HalfType(), ir.HalfType()]),
-                name=fnc_name,
+                self.llvm_mod, ir.FunctionType(f32, [f32, f32]), name=fnc_name
             )
         else:
             minnum_fn = self.llvm_mod.globals[fnc_name]
-        self.ssa_map[op.results[0]] = self.b.call(minnum_fn, [lhs, rhs], name=res_name)
+        lhs_f32 = self.b.fpext(lhs, f32)
+        rhs_f32 = self.b.fpext(rhs, f32)
+        result_f32 = self.b.call(minnum_fn, [lhs_f32, rhs_f32])
+        self.ssa_map[op.results[0]] = self.b.fptrunc(result_f32, half, name=res_name)
 
     @add_op.register
     def _(self, op: FPMaximumFOp | FPMinimumFOp) -> None:
         res_name = self.result_name(op)
         lhs, rhs = self.operands(op)
-
-        if isinstance(op, FPMaximumFOp):
-            fnc_name = "llvm.maximum.f16"
+        # llvm.minimum/maximum (NaN-propagating) not supported on cascadelake.
+        # Implement manually:
+        #   minimum(a,b) = isnan(a) ? a : (isnan(b) ? b : (a < b ? a : b))
+        #   maximum(a,b) = isnan(a) ? a : (isnan(b) ? b : (a > b ? a : b))
+        nan_lhs = self.b.fcmp_unordered("!=", lhs, lhs)  # isnan(lhs)
+        nan_rhs = self.b.fcmp_unordered("!=", rhs, rhs)  # isnan(rhs)
+        if isinstance(op, FPMinimumFOp):
+            cmp = self.b.fcmp_ordered("<", lhs, rhs)  # lhs < rhs
         else:
-            fnc_name = "llvm.minimum.f16"
-
-        if fnc_name not in self.llvm_mod.globals:
-            fn = ir.Function(
-                self.llvm_mod,
-                ir.FunctionType(ir.HalfType(), [ir.HalfType(), ir.HalfType()]),
-                name=fnc_name,
-            )
-        else:
-            fn = self.llvm_mod.globals[fnc_name]
-
-        self.ssa_map[op.results[0]] = self.b.call(fn, [lhs, rhs], name=res_name)
+            cmp = self.b.fcmp_ordered(">", lhs, rhs)  # lhs > rhs
+        normal_res = self.b.select(cmp, lhs, rhs)  # pick smaller/larger
+        prop_rhs = self.b.select(nan_rhs, rhs, normal_res)  # if rhs is NaN, return rhs
+        self.ssa_map[op.results[0]] = self.b.select(nan_lhs, lhs, prop_rhs, name=res_name)
 
     @add_op.register
     def _(self, op: FPIsNanOp) -> None:

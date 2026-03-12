@@ -3,6 +3,7 @@ from xdsl.ir import Operation, SSAValue
 from xdsl_smt.dialects.transfer import MakeOp
 
 from synth_xfer._util.synth_context import is_of_type, not_in_main_body
+from synth_xfer.dialects.fp import FPMakeOp
 
 
 class MutationProgram:
@@ -19,11 +20,16 @@ class MutationProgram:
     func: FuncOp
     old_op: None | Operation
     new_op: None | Operation
+    old_ops: None | list[Operation]
+    new_ops: None | list[Operation]
 
     def __init__(self, func: FuncOp):
         self.func = func
         self.old_op = None
         self.new_op = None
+        self.old_ops = None
+        self.new_ops = None
+        self._backup_func = None
 
     @property
     def ops(self):
@@ -40,7 +46,7 @@ class MutationProgram:
 
         assert isinstance(self.ops[-1], ReturnOp)
 
-        if isinstance(self.ops[-2], MakeOp):  # regular function
+        if isinstance(self.ops[-2], (MakeOp, FPMakeOp)):  # regular function
             last_make_op = self.ops[-2]
             for operand in last_make_op.operands:
                 assert isinstance(operand.owner, Operation)
@@ -98,3 +104,17 @@ class MutationProgram:
         Get operations that return a value of type ty and are before ops[x], which can serve as operands
         """
         return [op.results[0] for op in self.ops[:x] if is_of_type(op, ty)]
+
+    def remove_history_window(self):
+        assert self.old_ops is not None
+        self._backup_func = None
+        self.old_ops = None
+        self.new_ops = None
+
+    def revert_window(self):
+        assert self.old_ops is not None
+        assert self._backup_func is not None
+        self.func = self._backup_func
+        self._backup_func = None
+        self.old_ops = None
+        self.new_ops = None

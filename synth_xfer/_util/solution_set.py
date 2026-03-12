@@ -9,6 +9,7 @@ from xdsl.dialects.func import CallOp, FuncOp, ReturnOp
 
 from synth_xfer._util.cond_func import FunctionWithCondition
 from synth_xfer._util.dce import dce
+from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.eval_result import EvalResult
 from synth_xfer._util.log import get_logger, write_log_file
 from synth_xfer._util.parse_mlir import HelperFuncs
@@ -194,6 +195,7 @@ class UnsizedSolutionSet(SolutionSet):
         new_candidates_c: list[FunctionWithCondition],
         helper_funcs: HelperFuncs,
         num_unsound_candidates: int,
+        domain: AbstractDomain = AbstractDomain.KnownBits,
     ) -> SolutionSet:
         logger = get_logger()
         candidates = self.solutions + new_candidates_sp + new_candidates_c
@@ -244,11 +246,12 @@ class UnsizedSolutionSet(SolutionSet):
                     rewritten: FunctionWithCondition,
                 ) -> bool:
                     is_sound, _ = verify_function(
-                        bw,
                         original.get_function(),
                         [original.func, original.cond],
                         helper_funcs,
                         200,
+                        bw=bw,
+                        domain=domain,
                     )
                     if is_sound is None:
                         logger.info(
@@ -264,11 +267,12 @@ class UnsizedSolutionSet(SolutionSet):
                         return False
                     if self.optimize:
                         is_sound_rwt, _ = verify_function(
-                            bw,
                             rewritten.get_function(),
                             [rewritten.func, rewritten.cond],
                             helper_funcs,
                             200,
+                            bw=bw,
+                            domain=domain,
                         )
                         if is_sound != is_sound_rwt:
                             logger.info(
@@ -315,7 +319,7 @@ class UnsizedSolutionSet(SolutionSet):
         self.solutions_size = len(self.solutions)
 
         final_result = self.eval_improve([])[0]
-        if final_result.get_unsolved_cases() == 0:
+        if final_result.get_exact_prop() == 1:
             self.is_perfect = True
             return self
 

@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Callable
 
 from synth_xfer._util.cond_func import FunctionWithCondition
 from synth_xfer._util.domain import AbstractDomain
-from synth_xfer._util.dsl_operators import DslOpSet, load_dsl_ops
+from synth_xfer._util.dsl_operators import FP_DSL_OPS, DslOpSet, load_dsl_ops
 from synth_xfer._util.eval import eval_transfer_func, setup_eval
 from synth_xfer._util.eval_result import EvalResult
 from synth_xfer._util.jit import Jit
@@ -64,12 +64,17 @@ def _eval_helper(
 
 
 def _setup_context(
-    r: Random, use_full_i1_ops: bool, dsl_ops: DslOpSet | None
+    r: Random, use_full_i1_ops: bool, dsl_ops: DslOpSet | None, domain: AbstractDomain
 ) -> SynthesizerContext:
-    c = SynthesizerContext(r, dsl_ops=dsl_ops)
-    c.set_cmp_flags([0, 6, 7])
-    if not use_full_i1_ops and dsl_ops is None:
-        c.use_basic_i1_ops()
+    if domain == AbstractDomain.FPRange:
+        c = SynthesizerContext(r, dsl_ops=FP_DSL_OPS, domain=domain)
+        # No cmp_flags needed — FPCmpOp uses string predicates, not integer flags
+        # No i1 op restriction needed — FP_DSL_OPS already has the right fp_bool_ops
+    else:
+        c = SynthesizerContext(r, dsl_ops=dsl_ops, domain=domain)
+        c.set_cmp_flags([0, 6, 7])
+        if not use_full_i1_ops and dsl_ops is None:
+            c.use_basic_i1_ops()
     return c
 
 
@@ -94,11 +99,23 @@ def run(
     num_unsound_candidates: int,
     optimize: bool,
     sampler: Sampler,
+    mutation_flags: set[str],
 ) -> EvalResult:
     logger = get_logger()
     jit = Jit()
     dsl_ops: DslOpSet | None = load_dsl_ops(dsl_ops_path) if dsl_ops_path else None
 
+    if domain == AbstractDomain.FPRange:
+        assert len(lbw) == 0, "LBW not supported for FPRange domain"
+        assert num_abd_procs == 0 or True
+        if mbw:
+            assert len(mbw) == 1 and mbw[0][0] == 16 and len(hbw) == 0, (
+                "Only MBW of 16 is supported for FPRange domain"
+            )
+        if hbw:
+            assert len(hbw) == 1 and hbw[0][0] == 16 and len(mbw) == 0, (
+                "Only HBW of 16 is supported for FPRange domain"
+            )
     EvalResult.init_bw_settings(
         set(lbw), set([t[0] for t in mbw]), set([t[0] for t in hbw])
     )
@@ -121,31 +138,37 @@ def run(
     solution_eval_func = _eval_helper(to_eval, all_bws, helper_funcs, jit)
     solution_set = UnsizedSolutionSet([], solution_eval_func, optimize=optimize)
 
-    context = _setup_context(random, False, dsl_ops)
-    context_weighted = _setup_context(random, False, dsl_ops)
-    context_cond = _setup_context(random, True, dsl_ops)
+    context = _setup_context(random, False, dsl_ops, domain)
+    context_weighted = _setup_context(random, False, dsl_ops, domain)
+    context_cond = _setup_context(random, True, dsl_ops, domain)
 
     start_time = perf_counter()
     init_cmp_res = solution_set.eval_improve([])[0]
     run_time = perf_counter() - start_time
     logger.perf(f"Init Eval took {run_time:.4f}s")
 
-    init_exact = init_cmp_res.get_exact_prop() * 100
-    s = f"Top Solution | Exact {init_exact:.4f}% |"
+    init_norm = init_cmp_res.get_sound_dist()
+    init_exact_log = ""
+    if init_cmp_res.all_low_med_cases > 0:
+        init_exact = init_cmp_res.get_exact_prop() * 100
+        init_exact_log = f"Exact {init_exact:.4f}% | "
+    s = f"Top Solution | {init_exact_log}Norm {init_norm:.4f} |"
     logger.info(s)
     print(s)
 
     current_prog_len = program_length
     current_num_steps = num_steps
-    current_num_abd_procs = num_abd_procs
+    current_num_abd_procs = 0 if domain == AbstractDomain.FPRange else num_abd_procs
     for ith_iter in range(num_iters):
         iter_start = perf_counter()
         # gradually increase the program length
         current_prog_len += (program_length - current_prog_len) // (num_iters - ith_iter)
         current_num_steps += (num_steps - current_num_steps) // (num_iters - ith_iter)
-        current_num_abd_procs += (num_abd_procs - current_num_abd_procs) // (
-            num_iters - ith_iter
-        )
+
+        if domain != AbstractDomain.FPRange:
+            current_num_abd_procs += (num_abd_procs - current_num_abd_procs) // (
+                num_iters - ith_iter
+            )
 
         if weighted_dsl:
             assert isinstance(solution_set, UnsizedSolutionSet)
@@ -163,6 +186,9 @@ def run(
             current_prog_len,
             current_num_steps,
             condition_length,
+            # Xuanyu: I don't exactly know the purpose of passing bw here so I set this as a random number for now. Since we hardcode everything to be fp16 in FPRange case, this parameter should not be used when mutate FPRange transformers.
+            bw=233,
+            mutation_flags=mutation_flags,
         )
 
         solution_set = synthesize_one_iteration(
@@ -177,6 +203,7 @@ def run(
             prec_set,
             lbw,
             vbw,
+            domain=domain,
         )
 
         write_log_file(
@@ -194,9 +221,13 @@ def run(
         )
 
         iter_time = perf_counter() - iter_start
-        final_exact = final_cmp_res.get_exact_prop() * 100
+        final_norm = final_cmp_res.get_sound_dist()
+        final_exact_log = ""
+        if final_cmp_res.all_low_med_cases > 0:
+            final_exact = final_cmp_res.get_exact_prop() * 100
+            final_exact_log = f"Exact {final_exact:.4f}% | "
         print(
-            f"Iteration {ith_iter}  | Exact {final_exact:.4f}% | {solution_set.solutions_size} solutions | {iter_time:.4f}s |"
+            f"Iteration {ith_iter}  | {final_exact_log}Norm {final_norm:.4f} | {solution_set.solutions_size} solutions | {iter_time:.4f}s |"
         )
 
         logger.info(
@@ -222,10 +253,11 @@ def run(
     sol_to_eval = {bw: (to_eval[bw], [sol_ptrs[bw]], []) for bw in all_bws}
     solution_result = eval_transfer_func(sol_to_eval)[0]
 
-    solution_exact = solution_result.get_exact_prop() * 100
-    print(
-        f"Final Soln   | Exact {solution_exact:.4f}% | {solution_set.solutions_size} solutions |"
-    )
+    solution_exact_log = ""
+    if solution_result.all_low_med_cases > 0:
+        solution_exact = solution_result.get_exact_prop() * 100
+        solution_exact_log = f"Exact {solution_exact:.4f}% | "
+    print(f"Final Soln   | {solution_exact_log}{solution_set.solutions_size} solutions |")
 
     return solution_result
 
@@ -235,6 +267,7 @@ def main() -> None:
 
     domain = AbstractDomain[args.domain]
     op_path = Path(args.transfer_function)
+    mutation_flags = set(args.mutation_flags.split(","))
 
     if args.output is None:
         outputs_folder = Path("outputs", f"{domain}_{op_path.stem}")
@@ -271,4 +304,5 @@ def main() -> None:
         num_unsound_candidates=args.num_unsound_candidates,
         optimize=args.optimize,
         sampler=sampler,
+        mutation_flags=mutation_flags,
     )
