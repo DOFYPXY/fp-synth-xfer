@@ -20,7 +20,28 @@ from xdsl_smt.semantics.semantics import (
     TypeSemantics,
 )
 
-from synth_xfer.dialects.fp import *
+from synth_xfer.dialects.fp import (
+    FPAbsOp,
+    FPAbsValueType,
+    FPAddOp,
+    FPCmpOp,
+    FPConstantOp,
+    FPDivOp,
+    FPGetOp,
+    FPIsNanOp,
+    FPMakeOp,
+    FPMaximumFOp,
+    FPMaxOp,
+    FPMinimumFOp,
+    FPMinOp,
+    FPMulOp,
+    FPNegInfOp,
+    FPNegOp,
+    FPPosInfOp,
+    FPSqrtOp,
+    FPSubOp,
+    FloatType
+)
 
 # IEEE 754 float16 layout: 1 sign bit, 5 exponent bits, 10 mantissa bits
 _FP16_EB = 5
