@@ -21,6 +21,7 @@ from xdsl_smt.semantics.semantics import (
 )
 
 from synth_xfer.dialects.fp import (
+    FloatType,
     FPAbsOp,
     FPAbsValueType,
     FPAddOp,
@@ -40,7 +41,6 @@ from synth_xfer.dialects.fp import (
     FPPosInfOp,
     FPSqrtOp,
     FPSubOp,
-    FloatType
 )
 
 # IEEE 754 float16 layout: 1 sign bit, 5 exponent bits, 10 mantissa bits
