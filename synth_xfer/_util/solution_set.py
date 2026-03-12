@@ -319,7 +319,7 @@ class UnsizedSolutionSet(SolutionSet):
         self.solutions_size = len(self.solutions)
 
         final_result = self.eval_improve([])[0]
-        if final_result.get_unsolved_cases() == 0:
+        if final_result.get_exact_prop() == 1:
             self.is_perfect = True
             return self
 
