@@ -163,9 +163,13 @@ class EvalResult:
         return self.sounds / self.all_cases
 
     def get_exact_prop(self) -> float:
+        if self.all_low_med_cases == 0:
+            return 0.0
         return self.exacts / self.all_low_med_cases
 
     def get_unsolved_exact_prop(self) -> float:
+        if self.unsolved_cases == 0:
+            return 0.0
         return self.unsolved_exacts / self.unsolved_cases
 
     def get_new_exact_prop(self) -> float:
