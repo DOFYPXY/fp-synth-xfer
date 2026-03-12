@@ -192,15 +192,32 @@ class MCMCSampler:
 
     def perturb_constant(self, history: bool):
         ops = self.current.ops
-        const_ops = [(op, idx) for idx, op in enumerate(ops) if isinstance(op, Constant)]
-        if not const_ops:
+        int_const_ops = [
+            (op, idx) for idx, op in enumerate(ops) if isinstance(op, Constant)
+        ]
+        fp_const_ops = [
+            (op, idx) for idx, op in enumerate(ops) if isinstance(op, FPConstantOp)
+        ]
+        all_const_ops = int_const_ops + fp_const_ops
+        if not all_const_ops:
             return
 
-        old_const, idx = self.random.choice(const_ops)
-        ref_val = old_const.op
+        old_const, _ = self.random.choice(all_const_ops)
 
-        new_val = self._sample_perturbed_constant(old_const.value.value.data)
-        new_const = Constant(ref_val, new_val)
+        if isinstance(old_const, FPConstantOp):
+            import struct
+
+            current_bits = int.from_bytes(
+                struct.pack(">e", old_const.value.value.data), "big"
+            )
+            new_bits = self._sample_perturbed_constant(current_bits)
+            new_val = struct.unpack(">e", new_bits.to_bytes(2, "big"))[0]
+            new_const = FPConstantOp(new_val)
+        else:
+            ref_val = old_const.op
+            new_val = self._sample_perturbed_constant(old_const.value.value.data)
+            new_const = Constant(ref_val, new_val)
+
         self.current.subst_operation(old_const, new_const, history)
 
     def _sample_perturbed_constant(self, current_val: int) -> int:
@@ -229,16 +246,16 @@ class MCMCSampler:
 
     def _fp_constant_candidates(self) -> list[int]:
         return [
-            0,  # 0.0
-            0x80000000,  # -0.0
-            0x3F800000,  # 1.0
-            0xBF800000,  # -1.0
-            0x7F800000,  # +inf
-            0xFF800000,  # -inf
-            0x7F7FFFFF,  # MAX_FLOAT
-            0xFF7FFFFF,  # -MAX_FLOAT
-            0x00800000,  # MIN_FLOAT (smallest normal)
-            0x7FC00000,  # NaN
+            0x0000,  # 0.0
+            0x8000,  # -0.0
+            0x3C00,  # 1.0
+            0xBC00,  # -1.0
+            0x7C00,  # +inf
+            0xFC00,  # -inf
+            0x7BFF,  # MAX_HALF (65504)
+            0xFBFF,  # -MAX_HALF
+            0x0400,  # MIN_HALF (smallest normal)
+            0x7E00,  # NaN
         ]
 
     def replace_op_window(self, history: bool):
