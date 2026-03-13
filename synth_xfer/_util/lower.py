@@ -65,9 +65,11 @@ from synth_xfer.dialects.fp import (
     FPAbsOp,
     FPAbsValueType,
     FPAddOp,
+    FPCeilOp,
     FPCmpOp,
     FPConstantOp,
     FPDivOp,
+    FPFloorOp,
     FPGetOp,
     FPIsNanOp,
     FPMakeOp,
@@ -638,6 +640,36 @@ class _LowerFuncToLLVM:
         else:
             sqrt_fn = self.llvm_mod.globals[fnc_name]
         self.ssa_map[op.results[0]] = self.b.call(sqrt_fn, [operand], name=res_name)
+
+    @add_op.register
+    def _(self, op: FPFloorOp) -> None:
+        res_name = self.result_name(op)
+        operand = self.operands(op)[0]
+        fnc_name = "llvm.floor.f16"
+        if fnc_name not in self.llvm_mod.globals:
+            floor_fn = ir.Function(
+                self.llvm_mod,
+                ir.FunctionType(ir.HalfType(), [ir.HalfType()]),
+                name=fnc_name,
+            )
+        else:
+            floor_fn = self.llvm_mod.globals[fnc_name]
+        self.ssa_map[op.results[0]] = self.b.call(floor_fn, [operand], name=res_name)
+
+    @add_op.register
+    def _(self, op: FPCeilOp) -> None:
+        res_name = self.result_name(op)
+        operand = self.operands(op)[0]
+        fnc_name = "llvm.ceil.f16"
+        if fnc_name not in self.llvm_mod.globals:
+            ceil_fn = ir.Function(
+                self.llvm_mod,
+                ir.FunctionType(ir.HalfType(), [ir.HalfType()]),
+                name=fnc_name,
+            )
+        else:
+            ceil_fn = self.llvm_mod.globals[fnc_name]
+        self.ssa_map[op.results[0]] = self.b.call(ceil_fn, [operand], name=res_name)
 
     # Sairam: We use "Cascade Lake" CPUs on the server that do not support FP16 instructions
     # So, promoting FP16 to FP32, applying the intrinsic, and then demoting it back works
