@@ -79,10 +79,8 @@ struct FPRange {
 
   bool constexpr isBottom() const noexcept {
     // Bottom is the empty set: no values in range and no NaN
-    // Convention: has_nan=false AND (lo > hi in FP order)
-    // For FP16: use sentinel lo=0x7C00u (+inf), hi=0xFC00u (-inf) to represent empty
-    if (has_nan) return false;
-    return fp16::lt(hi, lo);  // hi < lo in FP order means empty range
+    // Xuanyu: Treat all invalid ranges as bottom for now
+    return !is_valid(lo, hi, has_nan);
   }
 
   // Lattice operations
@@ -91,6 +89,9 @@ struct FPRange {
     // meet([lo1, hi1], [lo2, hi2], nan1, nan2) =
     //   [max(lo1, lo2), min(hi1, hi2)], (nan1 && nan2)
     // If resulting lo > hi, return bottom (empty set)
+    if (isBottom() || rhs.isBottom()) {
+      return bottom();
+    }
     std::uint16_t new_lo = fp16::max(lo, rhs.lo);
     std::uint16_t new_hi = fp16::min(hi, rhs.hi);
     bool new_nan = has_nan && rhs.has_nan;
@@ -101,6 +102,8 @@ struct FPRange {
     // Union of two ranges
     // join([lo1, hi1], [lo2, hi2], nan1, nan2) =
     //   [min(lo1, lo2), max(hi1, hi2)], (nan1 || nan2)
+    if (isBottom()) return rhs;
+    if (rhs.isBottom()) return *this;
     std::uint16_t new_lo = fp16::min(lo, rhs.lo);
     std::uint16_t new_hi = fp16::max(hi, rhs.hi);
     bool new_nan = has_nan || rhs.has_nan;
@@ -133,12 +136,12 @@ struct FPRange {
 
   std::uint16_t sample_concrete(std::mt19937 & rng) const {
     std::uniform_int_distribution<std::uint16_t> bits_dist(0, 0xFFFFu);
-    std::uniform_int_distribution<int> nan_check(0, 999);
+    // std::uniform_int_distribution<int> nan_check(0, 999);
 
-    // With small probability, sample NaN if it's in the range
-    if (has_nan && nan_check(rng) == 0) {
-      return fp16::NAN_PATTERN;
-    }
+    // // With small probability, sample NaN if it's in the range
+    // if (has_nan && nan_check(rng) == 0) {
+    //   return fp16::NAN_PATTERN;
+    // }
 
     // Rejection sampling: repeatedly sample until we get a value in [lo, hi]
     for (int attempts = 0; attempts < 1000; ++attempts) {
@@ -147,6 +150,9 @@ struct FPRange {
       // Skip NaN bit patterns if they're not allowed
       if (!has_nan && fp16::is_nan(candidate)) {
         continue;
+      }
+      else if(has_nan && fp16::is_nan(candidate)) {
+        return candidate;
       }
 
       // Check if candidate is within [lo, hi] using FP16 comparison
@@ -224,18 +230,22 @@ public:
   }
 
   // Validation helper
-  static constexpr bool is_valid(std::uint16_t lo, std::uint16_t hi, bool /* has_nan */) noexcept {
+  static constexpr bool is_valid(std::uint16_t lo, std::uint16_t hi, bool has_nan) noexcept {
     if (fp16::is_nan(lo) || fp16::is_nan(hi)) {
       // If either bound is NaN, the range is invalid (NaN cannot be a bound)
       return false;
     }
-    // For non-bottom: lo must be <= hi in FP comparison
+    // If NaN is included, the range can be anything (even invalid bounds) because at least the NaN is there
+    if (has_nan)
+      return true;
+
+    // For interval without nan: lo must be <= hi in FP comparison
     return fp16::le(lo, hi);
   }
 
   // Static constructors
   static constexpr FPRange bottom() noexcept {
-    // Return bottom element (empty set)
+    // Return canonical bottom element (empty set)
     // Convention: lo = +inf (0x7C00u), hi = -inf (0xFC00u), has_nan = false
     // This makes lo > hi in FP order, representing an impossible range
     return FPRange(fp16::POS_INF, fp16::NEG_INF, false);
@@ -259,33 +269,10 @@ public:
 
   // Lattice enumeration
   static std::vector<FPRange> enumLattice() {
-    // Enumerate elements of the FPRange lattice
-    // Enumerate lo, hi, and has_nan combinations that form valid FPRange elements
-    // Use representative FP16 values to keep size tractable
-    std::vector<FPRange> res;
-
-    // Select representative FP16 values for enumeration
-    std::vector<std::uint16_t> representative_values = {
-        fp16::NEG_INF,   // -inf
-        0xBC00u,         // -1.0
-        fp16::NEG_ZERO,  // -0.0
-        fp16::POS_ZERO,  // +0.0
-        0x3C00u,         // +1.0
-        fp16::POS_INF,   // +inf
-    };
-
-    // Enumerate all valid (lo, hi, has_nan) combinations
-    for (std::uint16_t lo : representative_values) {
-      for (std::uint16_t hi : representative_values) {
-        for (bool has_nan : {false, true}) {
-          if (is_valid(lo, hi, has_nan)) {
-            res.push_back(FPRange(lo, hi, has_nan));
-          }
-        }
-      }
-    }
-
-    return res;
+    // This method should not be used in practice due to the huge size of the lattice, throw an runtime error if called
+    throw std::runtime_error("Lattice enumeration is not supported for FPRange due to its large size");
+    // Xuanyu: change this function to return representative elements in the lattice
+    return {};
   }
 
   static constexpr std::uint64_t num_levels() noexcept {
