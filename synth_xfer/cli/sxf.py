@@ -106,7 +106,9 @@ def run(
     dsl_ops: DslOpSet | None = load_dsl_ops(dsl_ops_path) if dsl_ops_path else None
 
     if domain == AbstractDomain.FPRange:
-        assert len(lbw) == 0, "LBW not supported for FPRange domain"
+        # Note: The bitwidths are all dummy as we hardcode FP16, but the number of samples in mbw and hbw still matters.
+        lbw = []
+        print("FPRange domain: ignoring Low bitwidths (--lbw)")
         assert num_abd_procs == 0 or True
         if mbw:
             assert len(mbw) == 1 and mbw[0][0] == 16 and len(hbw) == 0, (
@@ -116,6 +118,10 @@ def run(
             assert len(hbw) == 1 and hbw[0][0] == 16 and len(mbw) == 0, (
                 "Only HBW of 16 is supported for FPRange domain"
             )
+        vbw = [16]
+        print(
+            "FPRange domain: ignoring the bitwidths to be verified (--vbw) and setting it to 16"
+        )
     EvalResult.init_bw_settings(
         set(lbw), set([t[0] for t in mbw]), set([t[0] for t in hbw])
     )
