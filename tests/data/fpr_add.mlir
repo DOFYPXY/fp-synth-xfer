@@ -9,9 +9,15 @@
     %ab_has_nan = "arith.ori"(%a_has_nan, %b_has_nan) : (i1, i1) -> i1
     %sum_lo = "fp.add"(%a_lo, %b_lo) : (!fp.float, !fp.float) -> !fp.float
     %sum_hi = "fp.add"(%a_hi, %b_hi) : (!fp.float, !fp.float) -> !fp.float
+    %a_lo_add_b_hi = "fp.add"(%a_lo, %b_hi) : (!fp.float, !fp.float) -> !fp.float
+    %a_hi_add_b_lo = "fp.add"(%a_hi, %b_lo) : (!fp.float, !fp.float) -> !fp.float
+    %a_lo_add_b_hi_nan = "fp.is_nan"(%a_lo_add_b_hi) : (!fp.float) -> i1
+    %a_hi_add_b_lo_nan = "fp.is_nan"(%a_hi_add_b_lo) : (!fp.float) -> i1
     %sum_lo_nan = "fp.is_nan"(%sum_lo) : (!fp.float) -> i1
     %sum_hi_nan = "fp.is_nan"(%sum_hi) : (!fp.float) -> i1
-    %sum_has_nan = "arith.ori"(%sum_lo_nan, %sum_hi_nan) : (i1, i1) -> i1
+    %sum_has_nan_tmp0 = "arith.ori"(%sum_lo_nan, %sum_hi_nan) : (i1, i1) -> i1
+    %sum_has_nan_tmp1 = "arith.ori"(%a_lo_add_b_hi_nan, %a_hi_add_b_lo_nan) : (i1, i1) -> i1
+    %sum_has_nan = "arith.ori"(%sum_has_nan_tmp0, %sum_has_nan_tmp1) : (i1, i1) -> i1
     %res_has_nan = "arith.ori"(%ab_has_nan, %sum_has_nan) : (i1, i1) -> i1
     %pos_inf = "fp.pos_inf"(%a_lo) : (!fp.float) -> !fp.float
     %neg_inf = "fp.neg_inf"(%a_lo) : (!fp.float) -> !fp.float
