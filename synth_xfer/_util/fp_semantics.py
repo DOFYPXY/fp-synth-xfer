@@ -216,6 +216,40 @@ class FPIsNanOpSemantics(OperationSemantics):
         return ((pair.results[0],), effect_state)
 
 
+class CeilOpSemantics(OperationSemantics):
+    """Lower ``fp.ceil`` to ``smt_fp.RoundToIntegralOp(RTP, x)``."""
+
+    def get_semantics(
+        self,
+        operands: Sequence[SSAValue],
+        results: Sequence[Attribute],
+        attributes: Mapping[str, Attribute | SSAValue],
+        effect_state: SSAValue | None,
+        rewriter: PatternRewriter,
+    ) -> tuple[Sequence[SSAValue], SSAValue | None]:
+        rtp = smt_fp.RTPOp()
+        op = smt_fp.RoundToIntegralOp(rtp.res, operands[0])
+        rewriter.insert_op_before_matched_op([rtp, op])
+        return ((op.results[0],), effect_state)
+
+
+class FloorOpSemantics(OperationSemantics):
+    """Lower ``fp.floor`` to ``smt_fp.RoundToIntegralOp(RTN, x)``."""
+
+    def get_semantics(
+        self,
+        operands: Sequence[SSAValue],
+        results: Sequence[Attribute],
+        attributes: Mapping[str, Attribute | SSAValue],
+        effect_state: SSAValue | None,
+        rewriter: PatternRewriter,
+    ) -> tuple[Sequence[SSAValue], SSAValue | None]:
+        rtn = smt_fp.RTNOp()
+        op = smt_fp.RoundToIntegralOp(rtn.res, operands[0])
+        rewriter.insert_op_before_matched_op([rtn, op])
+        return ((op.results[0],), effect_state)
+
+
 class FPCmpOpSemantics(OperationSemantics):
     """Lower ``fp.cmp`` to the appropriate SMT FP comparison predicate(s).
 
@@ -366,6 +400,8 @@ fp_semantics: dict[type[Operation], OperationSemantics] = {
     FPMinimumFOp: OpSemantics(smt_fp.MinOp),
     # With rounding mode
     FPSqrtOp: RoundingModeOpSemantics(smt_fp.SqrtOp),
+    FPCeilOp: CeilOpSemantics(),
+    FPFloorOp: FloorOpSemantics(),
     FPAddOp: RoundingModeOpSemantics(smt_fp.AddOp),
     FPSubOp: RoundingModeOpSemantics(smt_fp.SubOp),
     FPMulOp: RoundingModeOpSemantics(smt_fp.MulOp),
