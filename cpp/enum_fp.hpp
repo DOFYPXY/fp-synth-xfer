@@ -11,6 +11,7 @@
 
 #include "fprange.hpp"
 #include "rand.hpp"
+#include "fp16_ops.hpp"
 
 // EnumFP: Generate test cases for FPRange domain
 // Specialized for FP16 operations
@@ -83,49 +84,52 @@ public:
     return result;
   }
 
-  // TODO: Generate "mid" test cases: Random lattice sampling
+  // Generate "mid" test cases: representative combinations first, then random sampling
   EvalVec genMids(unsigned int num_lat_samples, std::mt19937 &rng,
                   const rngdist::Sampler &sampler) {
     EvalVec result;
-    result.reserve(num_lat_samples);
 
-    for (unsigned int i = 0; i < num_lat_samples; ++i) {
-      ArgsTuple args = make_random_args(rng, sampler);
+    // Enumerate all combinations of representative elements
+    auto rep_list = make_rep_args_list();
+    for (const auto &args : rep_list) {
       FPRange best = toBestAbst(args);
       result.emplace_back(tuple_cat_result(args, best));
+    }
+
+    // If num_lat_samples exceeds the representative list size, do random sampling
+    if (num_lat_samples > rep_list.size()) {
+      unsigned int extra =
+          num_lat_samples - static_cast<unsigned int>(rep_list.size());
+
+      for (unsigned int i = 0; i < extra; ++i) {
+        ArgsTuple args = make_random_args(rng, sampler);
+        FPRange best = toBestAbst(args);
+        result.emplace_back(tuple_cat_result(args, best));
+      }
     }
 
     return result;
   }
 
-  // Generate "high" test cases: Random lattice + concrete sampling
+  // Generate "high" test cases: representative combinations first, then random lattice + concrete sampling
   EvalVec genHighs(unsigned int num_lat_samples, unsigned int num_conc_samples,
                    std::mt19937 &rng, const rngdist::Sampler &sampler) {
     EvalVec result;
-    result.reserve(num_lat_samples);
 
-    for (unsigned int i = 0; i < num_lat_samples; ++i) {
-      ArgsTuple args = make_random_args(rng, sampler);
-      FPRange res = FPRange::bottom();
+    // Enumerate all combinations of representative elements
+    auto rep_list = make_rep_args_list();
+    for (const auto &args : rep_list) {
+      process_high_args(args, num_conc_samples, rng, result);
+    }
 
-      const std::uint64_t cap = static_cast<std::uint64_t>(num_conc_samples);
-      const std::uint64_t total_space = capped_concrete_space(args, cap);
-      if (total_space <= cap) {
-        res = toBestAbst(args);
-      } else {
-        for (unsigned int j = 0; j < num_conc_samples; ++j) {
-          std::array<std::uint16_t, N> concretes{};
-          fill_sampled_concretes(args, rng, concretes);
-
-          if (opCon && apply_n_ary(*opCon, concretes) == 0)
-            continue;
-
-          auto out = apply_n_ary(concOp, concretes);
-          res = res.join(FPRange::fromConcrete(out));
-        }
+    // If num_lat_samples exceeds the representative list size, do random sampling
+    if (num_lat_samples > rep_list.size()) {
+      unsigned int extra =
+          num_lat_samples - static_cast<unsigned int>(rep_list.size());
+      result.reserve(result.size() + extra);
+      for (unsigned int i = 0; i < extra; ++i) {
+        process_high_args(make_random_args(rng, sampler), num_conc_samples, rng, result);
       }
-
-      result.emplace_back(tuple_cat_result(args, res));
     }
 
     return result;
@@ -134,6 +138,63 @@ public:
 private:
   ConcOpFn concOp;
   std::optional<OpConFn> opCon;
+
+  // Process a single args tuple for genHighs: exact abstraction or concrete sampling.
+  // Always enumerates all rep_conc combinations first, then does random sampling
+  // for remaining budget if num_conc_samples >= product of rep_conc sizes.
+  void process_high_args(const ArgsTuple &args, unsigned int num_conc_samples,
+                         std::mt19937 &rng, EvalVec &result) const {
+    FPRange res = FPRange::bottom();
+    const std::uint64_t cap = static_cast<std::uint64_t>(num_conc_samples);
+    const std::uint64_t total_space = capped_concrete_space(args, cap);
+    if (total_space <= cap) {
+      res = toBestAbst(args);
+    } else {
+      // Always enumerate all rep_conc combinations first
+      auto rep_sets = build_rep_conc_sets(args);
+      std::uint64_t rep_product = 1;
+      std::apply([&](auto const &...vecs) {
+        ((rep_product *= vecs.size()), ...);
+      }, rep_sets);
+
+      std::array<std::uint16_t, N> concretes{};
+      for_each_conc_combination<0>(rep_sets, concretes, [&](const std::array<std::uint16_t, N> &vals) {
+        if (opCon && apply_n_ary(*opCon, vals) == 0)
+          return;
+        res = res.join(FPRange::fromConcrete(apply_n_ary(concOp, vals)));
+      });
+
+      // Additional random sampling for remaining budget
+      if (num_conc_samples >= rep_product) {
+        unsigned int extra = num_conc_samples - static_cast<unsigned int>(rep_product);
+        for (unsigned int j = 0; j < extra; ++j) {
+          fill_sampled_concretes(args, rng, concretes);
+
+          if (opCon && apply_n_ary(*opCon, concretes) == 0)
+            continue;
+
+          res = res.join(FPRange::fromConcrete(apply_n_ary(concOp, concretes)));
+        }
+      }
+    }
+    result.emplace_back(tuple_cat_result(args, res));
+  }
+
+  // Build the full list of N-ary Cartesian product combinations of representative elements
+  std::vector<ArgsTuple> make_rep_args_list() const {
+    auto reps = FPRange::get_representative_rand();
+    auto rep_lattices = [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+      return std::tuple<std::conditional_t<true, std::vector<FPRange>,
+                                           std::integral_constant<std::size_t, Is>>...>{
+          (static_cast<void>(Is), reps)...};
+    }(std::make_index_sequence<N>{});
+
+    std::vector<ArgsTuple> list;
+    ArgsTuple current{};
+    for_each_combination<0>(rep_lattices, current,
+                            [&](const ArgsTuple &args) { list.push_back(args); });
+    return list;
+  }
 
   // Generate random arguments based on lattice sampling
   ArgsTuple make_random_args(std::mt19937 &rng,
@@ -277,6 +338,13 @@ static std::uint64_t capped_concrete_space(const ArgsTuple &args,
   static auto build_concrete_sets(const ArgsTuple &args) {
     return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
       return std::make_tuple(std::get<Is>(args).toConcrete()...);
+    }(std::make_index_sequence<N>{});
+  }
+
+  // Build tuple of rep_conc value vectors from argument ranges
+  static auto build_rep_conc_sets(const ArgsTuple &args) {
+    return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+      return std::make_tuple(std::get<Is>(args).get_rep_conc()...);
     }(std::make_index_sequence<N>{});
   }
 };

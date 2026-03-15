@@ -30,42 +30,24 @@ struct FPRange {
     return !(*this == other);
   }
 
-  // Pretty printing
+  // Pretty printing: [lo, hi, T/F]
   friend std::ostream &operator<<(std::ostream &os, const FPRange &x) {
-    // Display as: [lo, hi] (has_nan) where lo/hi are FP16 values
-    // Example output: "[0.5, 1.5] (has_nan)" or "[0.5, 1.5]"
+    auto print_val = [&](std::uint16_t v) {
+      if (fp16::is_pos_inf(v))      os << "+inf";
+      else if (fp16::is_neg_inf(v)) os << "-inf";
+      else if (fp16::is_nan(v))     os << "nan";
+      else                          os << fp16::to_float(v);
+    };
 
     os << "[";
-
-    // Handle special cases for lo
-    if (fp16::is_pos_inf(x.lo)) {
-      os << "+inf";
-    } else if (fp16::is_neg_inf(x.lo)) {
-      os << "-inf";
-    } else if (fp16::is_nan(x.lo)) {
-      os << "nan";
-    } else {
-      os << fp16::to_float(x.lo);
-    }
-
+    print_val(x.lo);
     os << ", ";
+    print_val(x.hi);
+    os << (x.has_nan ? "; NaN" : "") << "]";
 
-    // Handle special cases for hi
-    if (fp16::is_pos_inf(x.hi)) {
-      os << "+inf";
-    } else if (fp16::is_neg_inf(x.hi)) {
-      os << "-inf";
-    } else if (fp16::is_nan(x.hi)) {
-      os << "nan";
-    } else {
-      os << fp16::to_float(x.hi);
-    }
-
-    os << "]";
-
-    if (x.has_nan) {
-      os << " (has_nan)";
-    }
+    if (x.isBottom())       os << "(bottom)";
+    else if (x.isTop())     os << "(top)";
+    else if (x.isOnlyNan())  os << "(only_nan)";
 
     return os;
   }
@@ -81,6 +63,16 @@ struct FPRange {
     // Bottom is the empty set: no values in range and no NaN
     // Xuanyu: Treat all invalid ranges as bottom for now
     return !is_valid(lo, hi, has_nan);
+  }
+
+  bool isOnlyNan() const noexcept {
+    // Check if this range represents only NaN
+    return has_nan && !fp16::le(lo, hi);
+  }
+
+  bool isCanonicalOnlyNan() const noexcept {
+    // Check if this range represents only NaN and is in canonical form (lo=POS_INF, hi=NEG_INF)
+    return has_nan && lo == fp16::POS_INF && hi == fp16::NEG_INF;
   }
 
   // Lattice operations
@@ -131,6 +123,22 @@ struct FPRange {
     if (has_nan) {
       res.push_back(fp16::NAN_PATTERN);
     }
+    return res;
+  }
+
+  // Returns true if the given FP16 bit pattern is contained in this range.
+  bool contains(std::uint16_t bits) const noexcept {
+    if (isBottom()) return false;
+    if (fp16::is_nan(bits)) return has_nan;
+    return fp16::ge(bits, lo) && fp16::le(bits, hi);
+  }
+
+  // Returns representative concrete values for this range: lo, hi, and NaN if has_nan.
+  std::vector<std::uint16_t> get_rep_conc() const {
+    std::vector<std::uint16_t> res;
+    if (contains(lo)) res.push_back(lo);
+    if (hi != lo && contains(hi)) res.push_back(hi);
+    if (contains(fp16::NAN_PATTERN)) res.push_back(fp16::NAN_PATTERN);
     return res;
   }
 
@@ -229,7 +237,7 @@ public:
     return size_estimate;
   }
 
-  // Validation helper
+  // Validation helper. This should be equivalent to get_constraint.mlir
   static constexpr bool is_valid(std::uint16_t lo, std::uint16_t hi, bool has_nan) noexcept {
     if (fp16::is_nan(lo) || fp16::is_nan(hi)) {
       // If either bound is NaN, the range is invalid (NaN cannot be a bound)
@@ -257,6 +265,14 @@ public:
     return FPRange(fp16::NEG_INF, fp16::POS_INF, true);
   }
 
+  static constexpr FPRange canonicaOnlyNan() noexcept {
+    // Return canonical NaN-only range
+    // Convention: lo = +inf, hi = -inf, has_nan = true (same as bottom but with NaN)
+    return FPRange(fp16::POS_INF, fp16::NEG_INF, true);
+  }
+
+
+
   static constexpr FPRange fromConcrete(std::uint16_t fp16_bits) noexcept {
     // TODO: Lift a concrete FP16 bit pattern to abstract domain
     // Should return a singleton range containing just this value
@@ -271,8 +287,28 @@ public:
   static std::vector<FPRange> enumLattice() {
     // This method should not be used in practice due to the huge size of the lattice, throw an runtime error if called
     throw std::runtime_error("Lattice enumeration is not supported for FPRange due to its large size");
-    // Xuanyu: change this function to return representative elements in the lattice
     return {};
+  }
+
+  // Returns representative FPRange elements by enumerating all valid (lo, hi) pairs
+  // from fp16::get_rep_values(), each with and without NaN, plus the NaN-only range.
+  static std::vector<FPRange> get_representative_rand() {
+    auto vals = fp16::get_rep_values();
+    std::vector<FPRange> reps;
+    // All valid (lo, hi) combinations from representative values
+    for (auto lo_val : vals) {
+      for (auto hi_val : vals) {
+        FPRange a_w_nan = FPRange(lo_val, hi_val, true);
+        FPRange a_wo_nan = FPRange(lo_val, hi_val, false);
+        if (!a_wo_nan.isBottom())
+          reps.push_back(a_wo_nan);
+        if (!a_w_nan.isBottom() && !a_w_nan.isOnlyNan())
+          reps.push_back(a_w_nan);
+      }
+    }
+    reps.push_back(canonicaOnlyNan());  // Add the NaN-only range as a representative
+
+    return reps;
   }
 
   static constexpr std::uint64_t num_levels() noexcept {

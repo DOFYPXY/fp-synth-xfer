@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <vector>
 
 // FP16 Operations: Utilities for FP16 (half-precision) floating point operations
 // FP16 is represented as a 16-bit unsigned integer (bit pattern)
@@ -153,6 +154,20 @@ inline float to_float(std::uint16_t bits) noexcept {
   float result;
   std::memcpy(&result, &fp32_bits, sizeof(result));
   return result;
+}
+
+// Returns a small set of representative FP16 bit patterns covering key boundary values.
+// Used by FPRange::get_representative_rand() to generate representative ranges.
+inline std::vector<std::uint16_t> get_rep_values() {
+  return {
+      NEG_INF,   // -inf
+      // 0xBC00u,   // -1.0
+      NEG_ZERO,  // -0.0
+      POS_ZERO,  // +0.0
+      // 0x3C00u,   // +1.0
+      POS_INF,   // +inf
+      NAN_PATTERN // NaN
+  };
 }
 
 }  // namespace fp16
