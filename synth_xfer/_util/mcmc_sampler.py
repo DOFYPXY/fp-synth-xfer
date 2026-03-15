@@ -137,7 +137,6 @@ class MCMCSampler:
         new_op = None
         while new_op is None:
             new_op = self.context.get_random_op(get_ret_type(old_op), valid_operands)
-
         self.current.subst_operation(old_op, new_op, history)
 
     def replace_operand(self, idx: int, history: bool):

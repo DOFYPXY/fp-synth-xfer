@@ -308,11 +308,15 @@ fp_float_ops: list[type[Operation]] = [
     FPNegOp,
     FPCeilOp,
     FPFloorOp,
+    SelectOp,
 ]
 
 fp_bool_ops: list[type[Operation]] = [
     FPCmpOp,
     FPIsNanOp,
+    arith.AndIOp,
+    arith.OrIOp,
+    arith.XOrIOp,
 ]
 
 FP_DSL_OPS: DslOpSet = {INT_T: fp_float_ops, BOOL_T: fp_bool_ops}
