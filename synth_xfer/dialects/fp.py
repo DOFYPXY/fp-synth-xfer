@@ -117,16 +117,6 @@ class FPSqrtOp(UnaryOp):
 
 
 @irdl_op_definition
-class FPCeilOp(UnaryOp):
-    name = "fp.ceil"
-
-
-@irdl_op_definition
-class FPFloorOp(UnaryOp):
-    name = "fp.floor"
-
-
-@irdl_op_definition
 class FPConstantOp(IRDLOperation):
     name = "fp.constant"
 
@@ -312,8 +302,6 @@ FP = Dialect(
         FPMakeOp,
         FPPosInfOp,
         FPNegInfOp,
-        FPFloorOp,
-        FPCeilOp,
     ],
     [FloatType, FPAbsValueType],
 )

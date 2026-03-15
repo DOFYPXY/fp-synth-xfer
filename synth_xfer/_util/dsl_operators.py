@@ -42,8 +42,10 @@ from xdsl_smt.dialects.transfer import (
 from synth_xfer.dialects.fp import (
     FPAbsOp,
     FPAddOp,
+    FPCeilOp,
     FPCmpOp,
     FPDivOp,
+    FPFloorOp,
     FPIsNanOp,
     FPMaxOp,
     FPMinOp,
@@ -292,8 +294,8 @@ int_prior_bias: dict[type[Operation], int] = {
     ClearSignBitOp: 0,
 }
 
-FP_FLOAT_T = "fp_float"  # FloatType operands
-FP_BOOL_T = "fp_bool"  # i1 operands
+# FP_FLOAT_T = "fp_float"  # FloatType operands
+# FP_BOOL_T = "fp_bool"  # i1 operands
 
 fp_float_ops: list[type[Operation]] = [
     FPAddOp,
@@ -304,6 +306,8 @@ fp_float_ops: list[type[Operation]] = [
     FPMinOp,
     FPAbsOp,
     FPNegOp,
+    FPCeilOp,
+    FPFloorOp,
 ]
 
 fp_bool_ops: list[type[Operation]] = [
