@@ -26,7 +26,7 @@ def verify_function(
     helper_funcs: HelperFuncs,
     timeout: int,
     domain: AbstractDomain = AbstractDomain.KnownBits,
-    solver: str = "z3",
+    solver: str = "cvc5",
     bw: int | None = None,
 ) -> tuple[bool | None, ModelRef | None]:
     xfer_helpers += [
