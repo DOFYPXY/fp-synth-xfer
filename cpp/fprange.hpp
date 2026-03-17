@@ -84,8 +84,8 @@ struct FPRange {
     if (isBottom() || rhs.isBottom()) {
       return bottom();
     }
-    std::uint16_t new_lo = fp16::max(lo, rhs.lo);
-    std::uint16_t new_hi = fp16::min(hi, rhs.hi);
+    std::uint16_t new_lo = fp16::maximum(lo, rhs.lo);
+    std::uint16_t new_hi = fp16::minimum(hi, rhs.hi);
     bool new_nan = has_nan && rhs.has_nan;
     return FPRange(new_lo, new_hi, new_nan);
   }
@@ -96,8 +96,8 @@ struct FPRange {
     //   [min(lo1, lo2), max(hi1, hi2)], (nan1 || nan2)
     if (isBottom()) return rhs;
     if (rhs.isBottom()) return *this;
-    std::uint16_t new_lo = fp16::min(lo, rhs.lo);
-    std::uint16_t new_hi = fp16::max(hi, rhs.hi);
+    std::uint16_t new_lo = fp16::minnum(lo, rhs.lo);
+    std::uint16_t new_hi = fp16::maxnum(hi, rhs.hi);
     bool new_nan = has_nan || rhs.has_nan;
     return FPRange(new_lo, new_hi, new_nan);
   }
@@ -212,6 +212,7 @@ private:
 public:
   std::uint64_t norm() const noexcept {
     if (isBottom()) return 0;
+    if (isOnlyNan()) return 1;  // Only NaN contributes to size
     std::uint64_t exp_count = const_cast<FPRange*>(this)->count_exponents();
     return exp_count + (has_nan ? 1 : 0);
   }

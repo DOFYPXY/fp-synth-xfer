@@ -87,19 +87,35 @@ inline int compare(std::uint16_t a, std::uint16_t b) noexcept {
   return 0;
 }
 
-// Return the maximum of two FP16 values
-// Follows IEEE 754: if one is NaN, return the other
-inline std::uint16_t max(std::uint16_t a, std::uint16_t b) noexcept {
+// Return the maximum of two FP16 values (IEEE 754-2008 maxNum)
+// If one operand is NaN, return the other; if both are NaN, return NaN
+inline std::uint16_t maxnum(std::uint16_t a, std::uint16_t b) noexcept {
   if (is_nan(a)) return b;
   if (is_nan(b)) return a;
   return compare(a, b) >= 0 ? a : b;
 }
 
-// Return the minimum of two FP16 values
-// Follows IEEE 754: if one is NaN, return the other
-inline std::uint16_t min(std::uint16_t a, std::uint16_t b) noexcept {
+// Return the minimum of two FP16 values (IEEE 754-2008 minNum)
+// If one operand is NaN, return the other; if both are NaN, return NaN
+inline std::uint16_t minnum(std::uint16_t a, std::uint16_t b) noexcept {
   if (is_nan(a)) return b;
   if (is_nan(b)) return a;
+  return compare(a, b) <= 0 ? a : b;
+}
+
+// Return the maximum of two FP16 values (IEEE 754-2019 maximum)
+// If either operand is NaN, return NaN
+inline std::uint16_t maximum(std::uint16_t a, std::uint16_t b) noexcept {
+  if (is_nan(a)) return a;
+  if (is_nan(b)) return b;
+  return compare(a, b) >= 0 ? a : b;
+}
+
+// Return the minimum of two FP16 values (IEEE 754-2019 minimum)
+// If either operand is NaN, return NaN
+inline std::uint16_t minimum(std::uint16_t a, std::uint16_t b) noexcept {
+  if (is_nan(a)) return a;
+  if (is_nan(b)) return b;
   return compare(a, b) <= 0 ? a : b;
 }
 
