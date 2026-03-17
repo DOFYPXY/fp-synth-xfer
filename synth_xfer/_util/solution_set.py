@@ -249,7 +249,7 @@ class UnsizedSolutionSet(SolutionSet):
                         original.get_function(),
                         [original.func, original.cond],
                         helper_funcs,
-                        200,
+                        400,
                         bw=bw,
                         domain=domain,
                     )
@@ -257,11 +257,13 @@ class UnsizedSolutionSet(SolutionSet):
                         logger.info(
                             f"Skip a function of which verification timed out at bw {bw}, body: {body_number}, cond: {cond_number}"
                         )
+                        logger.info(f"Timeout function:\n{original}")
                         return False
                     if not is_sound:
                         logger.info(
                             f"Skip a unsound function at bw {bw}, body: {body_number}, cond: {cond_number}"
                         )
+                        logger.info(f"Unsound function:\n{original}")
                         if bw in lbw:
                             self.handle_inconsistent_result(original)
                         return False
@@ -359,7 +361,8 @@ class UnsizedSolutionSet(SolutionSet):
                 self.solutions[:i] + self.solutions[i + 1 :],
             )
             res = cmp_results[0]
-            to_learn = res.get_new_exact_prop() > 0.005
+            # to_learn = res.get_new_exact_prop() > 0.005
+            to_learn = False
             body_number = sol.func.attributes["number"]
             cond_number = "None" if sol.cond is None else sol.cond.attributes["number"]
             logger.info(
