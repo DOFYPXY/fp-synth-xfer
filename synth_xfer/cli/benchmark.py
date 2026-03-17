@@ -6,7 +6,7 @@ from typing import Any
 
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.log import init_logging
-from synth_xfer.cli.args import build_parser, get_sampler
+from synth_xfer.cli.args import FP_BINARY_OPS, FP_UNARY_OPS, build_parser, get_sampler
 from synth_xfer.cli.sxf import run
 
 
@@ -52,6 +52,7 @@ def synth_run(
             num_unsound_candidates=args.num_unsound_candidates,
             optimize=args.optimize,
             sampler=sampler,
+            mutation_flags=args.mutation_flags,
         )
 
         return {
@@ -79,7 +80,10 @@ def main() -> None:
     args = build_parser("benchmark")
     start_dir = Path("mlir") / "Operations"
 
-    if len(args.kb_eval) + len(args.ucr_eval) + len(args.scr_eval) == 0:
+    if (
+        len(args.kb_eval) + len(args.ucr_eval) + len(args.scr_eval) + len(args.fpr_eval)
+        == 0
+    ):
         raise ValueError("No benchmarks selected to eval")
 
     if not args.output.exists():
@@ -101,8 +105,32 @@ def main() -> None:
         for x in args.scr_eval
     ]
 
+    fp_unary_dir = Path("mlir") / "FPOperations" / "Unary"
+    fp_binary_dir = Path("mlir") / "FPOperations" / "Binary"
+
+    fpr_ops: list[str] = []
+    for item in args.fpr_eval:
+        if item == "unary":
+            fpr_ops.extend(FP_UNARY_OPS)
+        elif item == "binary":
+            fpr_ops.extend(FP_BINARY_OPS)
+        else:
+            fpr_ops.append(item)
+    seen: set[str] = set()
+    fpr_ops = [x for x in fpr_ops if not (x in seen or seen.add(x))]
+
+    fpr_inputs = [
+        (
+            x,
+            AbstractDomain.FPRange,
+            (fp_unary_dir if x in FP_UNARY_OPS else fp_binary_dir) / f"{x}.mlir",
+            args,
+        )
+        for x in fpr_ops
+    ]
+
     with Pool() as p:
-        data = p.map(synth_run, kb_inputs + ucr_inputs + scr_inputs)
+        data = p.map(synth_run, kb_inputs + ucr_inputs + scr_inputs + fpr_inputs)
 
     with open(args.output.joinpath("data.json"), "w") as f:
         dump(data, f, indent=2)

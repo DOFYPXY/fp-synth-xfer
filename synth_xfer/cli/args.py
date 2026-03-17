@@ -120,6 +120,23 @@ def get_sampler(args: Namespace) -> Sampler:
     return Sampler.uniform()
 
 
+FP_UNARY_OPS = [
+    "FPAbs",
+    "FPCeil",
+    "FPFloor",
+    "FPInc",
+    "FPNop",
+]
+
+FP_BINARY_OPS = [
+    "FPAdd",
+    "FPDiv",
+    "FPMax",
+    "FPMin",
+    "FPMul",
+    "FPSub",
+]
+
 ALL_OPS = [
     "Abds",
     "Abdu",
@@ -225,6 +242,17 @@ def build_parser(prog: str) -> Namespace:
             choices=ALL_OPS,
             default=[],
             help=f"Zero or more items from: {', '.join(ALL_OPS)}",
+        )
+        _fpr_choices = ["unary", "binary"] + FP_UNARY_OPS + FP_BINARY_OPS
+        p.add_argument(
+            "--fpr-eval",
+            nargs="*",
+            choices=_fpr_choices,
+            default=[],
+            help=(
+                "FPRange ops to benchmark. Use 'unary' or 'binary' as shorthand for all ops "
+                f"in that group, or pick individual ops. Choices: {', '.join(_fpr_choices)}"
+            ),
         )
 
     output_dir = Path("outputs") if prog == "benchmark" else None

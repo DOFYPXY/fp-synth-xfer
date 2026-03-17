@@ -119,7 +119,10 @@ def get_helper_funcs(p: Path, d: AbstractDomain) -> HelperFuncs:
     xfer_fn = FuncOp.from_region("empty_transformer", xfer_args, xfer_ret)
 
     def get_domain_fns(fp: str) -> FuncOp:
-        dp = p.resolve().parent.parent.joinpath(str(d), fp)
+        mlir_root = p.resolve()
+        while mlir_root.name != "mlir":
+            mlir_root = mlir_root.parent
+        dp = mlir_root.joinpath(str(d), fp)
         return parse_mlir_func(dp)
 
     top = get_domain_fns("top.mlir")
