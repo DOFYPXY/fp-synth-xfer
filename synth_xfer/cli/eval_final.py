@@ -84,6 +84,13 @@ def _reg_args():
         type=str,
         help="Transformer function name (optional override)",
     )
+    p.add_argument(
+        "--base-fns",
+        type=Path,
+        default=None,
+        metavar="MLIR_FILE",
+        help="MLIR file (builtin.module with multiple functions) whose functions are passed as base functions in evaluation",
+    )
 
     return p.parse_args()
 
@@ -139,6 +146,7 @@ def run(
     xfer_name: str,
     random_seed: int | None,
     sampler: Sampler,
+    base_fn_path: Path | None = None,
 ) -> tuple[EvalResult, EvalResult]:
     all_bws = lbw + [x[0] for x in mbw] + [x[0] for x in hbw]
     helpers = get_helper_funcs(op_path, domain)
@@ -160,6 +168,13 @@ def run(
     to_shim = [xfer_name] if needs_shim else []
     lowerer.add_mod(sol_module, to_shim)
 
+    base_fn_names: list[str] = []
+    if base_fn_path is not None:
+        base_mod = parse_mlir_mod(base_fn_path)
+        base_fn_names = list(get_fns(base_mod).keys())
+        base_to_shim = base_fn_names if needs_shim else []
+        lowerer.add_mod(base_mod, base_to_shim)
+
     jit = Jit()
     jit.add_mod(str(lowerer))
     to_eval = setup_eval(lbw, mbw, hbw, random_seed, helpers, jit, sampler)
@@ -174,7 +189,7 @@ def run(
                 jit.get_fn_ptr(top_xfer[bw].name),
                 jit.get_fn_ptr(f"{xfer_name}_{bw}{xfer_fn_suffix}"),
             ],
-            [],
+            [jit.get_fn_ptr(f"{fn}_{bw}{xfer_fn_suffix}") for fn in base_fn_names],
         )
         for bw in all_bws
     }
@@ -194,6 +209,7 @@ class EvalJob:
     random_seed: int | None
     bw_args: tuple[list[int], list[tuple[int, int]], list[tuple[int, int, int]]]
     args: Namespace
+    base_fn_path: Path | None = None
 
 
 def _run_job(job: EvalJob) -> tuple[EvalResult, EvalResult]:
@@ -209,6 +225,7 @@ def _run_job(job: EvalJob) -> tuple[EvalResult, EvalResult]:
         xfer_name=job.xfer_name,
         random_seed=job.random_seed,
         sampler=sampler,
+        base_fn_path=job.base_fn_path,
     )
 
 
@@ -272,6 +289,7 @@ def _make_job(
         random_seed=args.random_seed,
         bw_args=bw_args,
         args=args,
+        base_fn_path=args.base_fns,
     )
 
 
